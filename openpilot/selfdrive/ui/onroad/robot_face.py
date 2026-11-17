@@ -10,10 +10,10 @@ UI만으로 동작한다. 표정은 눈 2개의 모양·색·움직임만으로 
 
 눈은 "반짝이 눈" 스타일이다: 따뜻한 그라데이션(밝은 중심→은은한 가장자리),
 윗꺼풀 그림자 띠, 주변 빛무리(글로우), 흰색 하이라이트 2개, 간헐적으로
-뜨는 네 갈래 반짝이. 인게이지하면 잠깐 별눈이 반짝인 뒤 민트색 집중 눈이
+뜨는 네 갈래 반짝이. 인게이지하면 잠깐 핸들 모양이 떴다가 민트색 집중 눈이
 된다. 커브에서는 도는 방향의 반대로 얼굴이 쏠리고 현재 횡가속도를 보여준다.
 인게이지 상태에서는 하단에 최소 HUD(핸들·현재 속도·목표 속도·차간거리)가
-나온다.
+나온다. 깜빡이 때는 방향 쪽에 꺾쇠 화살표 한 개(90도)가 점멸한다.
 
 표정 우선순위 (위쪽이 이김):
   운전자 주의 > 급제동 > 후진 > 차선변경 > 깜빡이 > 클램프 보정 > 출발 >
@@ -106,7 +106,7 @@ TRANSIENT_SEC = 3.0           # 출발/주의 해제/디스인게이지 표시 �
 TEST_PREVIEW_SEC = 10.0       # 토글 OFF 상태에서 표정 테스트 표시 시간
 BLINK_PERIOD_SEC = 2.2        # 눈 깜빡임 주기
 BLINK_DURATION_SEC = 0.12     # 눈이 감겼다 뜨는 시간
-STAR_FLASH_SEC = 0.8          # 인게이지 시 별눈 표시 시간
+ENGAGE_FLASH_SEC = 0.8        # 인게이지 시 핸들 플래시 표시 시간
 BREATHE_PERIOD_SEC = 2.5      # 호흡(미세한 커짐/작아짐) 주기
 SPARKLE_COUNT = 3             # 반짝이 개수
 SPARKLE_PERIOD_SEC = 3.0      # 반짝이 깜빡임 사이클
@@ -147,8 +147,8 @@ EYE_PALETTES = {
 SHADOW_BAND_COLOR = rl.Color(120, 80, 50, 45)   # 윗꺼풀 그림자 띠
 HIGHLIGHT_COLOR = rl.Color(255, 255, 255, 235)  # 큰 하이라이트
 HIGHLIGHT_SMALL_COLOR = rl.Color(255, 255, 255, 130)  # 작은 하이라이트
-STAR_COLOR = rl.Color(255, 248, 235, 255)       # 별눈 테두리 (크림빛 흰색)
-CHEVRON_COLOR = rl.ORANGE                        # 깜빡이 << >> 색
+WHEEL_FLASH_COLOR = rl.Color(110, 230, 170, 255)  # 인게이지 핸들 플래시 (밝은 민트)
+CHEVRON_COLOR = rl.ORANGE                        # 깜빡이 꺾쇠(< >) 색
 HUD_GREEN = rl.Color(0x16, 0x7F, 0x40, 255)      # HUD 핸들·차간 막대
 HUD_TEXT = rl.Color(255, 255, 255, 230)          # HUD 글자
 HUD_DIM = rl.Color(255, 255, 255, 160)           # HUD 보조 글자
@@ -438,20 +438,20 @@ class RobotFaceView(Widget):
 
     lean_x = self._lean_offset(sig, scale)
 
-    # 눈 (인게이지 직후 0.8초는 별눈)
-    if state == FaceState.ENGAGED and now - self._engage_time < STAR_FLASH_SEC:
-      self._draw_star_eyes(rect, now, lean_x, scale)
+    # 눈 (인게이지 직후 0.8초는 핸들 플래시)
+    if state == FaceState.ENGAGED and now - self._engage_time < ENGAGE_FLASH_SEC:
+      self._draw_wheel_flash(rect, now, lean_x, scale)
     else:
       self._draw_eyes(rect, state, now, lean_x, scale)
 
     # 반짝이
     self._draw_sparkles(rect, state, now, lean_x, scale)
 
-    # 깜빡이 << >>
+    # 깜빡이 < >
     if state == FaceState.BLINKER_LEFT:
-      self._draw_chevrons(rect, -1, now, lean_x, scale)
+      self._draw_chevron(rect, -1, now, lean_x, scale)
     elif state == FaceState.BLINKER_RIGHT:
-      self._draw_chevrons(rect, 1, now, lean_x, scale)
+      self._draw_chevron(rect, 1, now, lean_x, scale)
 
     # 인게이지 HUD (핸들·현재 속도·목표 속도·차간거리)
     if state == FaceState.ENGAGED:
@@ -590,30 +590,27 @@ class RobotFaceView(Widget):
       rl.draw_circle(int(ex + w * 0.30), int(base_y + h * 0.28), w * 0.16, HIGHLIGHT_COLOR)
       rl.draw_circle(int(ex + w * 0.62), int(base_y + h * 0.48), w * 0.08, HIGHLIGHT_SMALL_COLOR)
 
-  def _draw_star(self, cx: float, cy: float, radius: float, color: rl.Color, thickness: float) -> None:
-    """속 빈 5각 별 테두리 (약간 기울어짐)."""
-    points = []
-    for i in range(10):
-      r = radius if i % 2 == 0 else radius * 0.42
-      angle = math.radians(-15.0 + i * 36.0 - 90.0)
-      points.append((cx + r * math.cos(angle), cy + r * math.sin(angle)))
-    for i in range(10):
-      x1, y1 = points[i]
-      x2, y2 = points[(i + 1) % 10]
-      rl.draw_line_ex(rl.Vector2(x1, y1), rl.Vector2(x2, y2), thickness, color)
-
-  def _draw_star_eyes(self, rect: rl.Rectangle, now: float, lean_x: float, scale: float = 1.0) -> None:
-    """인게이지 직후 별눈 플래시: 두 눈 자리에 큰 별 테두리 + 주변 반짝이."""
+  def _draw_wheel_flash(self, rect: rl.Rectangle, now: float, lean_x: float, scale: float = 1.0) -> None:
+    """인게이지 직후 핸들 플래시: 두 눈 자리에 큰 핸들 아이콘 + 주변 반짝이.
+    핸들은 원 + 스포크 3개 + 허브, 인게이지 민트색. 0.8초 후 민트 눈 + HUD로
+    이어진다."""
     cx = rect.x + rect.width / 2.0 + lean_x
     cy = rect.y + rect.height / 2.0
     eye_h = rect.height * 0.34
     eye_w = eye_h * 0.8
     gap = eye_w * 1.0
     half_span = eye_w / 2.0 + gap / 2.0
-    radius = eye_h * 0.6
-    for sign in (-1, 1):
-      self._draw_star(cx + sign * half_span, cy, radius, STAR_COLOR, 8.0 * scale)
-    # 별 주변 작은 반짝이
+    # 핸들: 눈 한 쌍이 차지하던 자리 중앙에 크게 그린다.
+    wheel_r = eye_h * 0.7
+    rl.draw_circle_lines(int(cx), int(cy), wheel_r, WHEEL_FLASH_COLOR)
+    for angle_deg in (90.0, 210.0, 330.0):
+      a = math.radians(angle_deg)
+      rl.draw_line_ex(
+        rl.Vector2(cx, cy),
+        rl.Vector2(cx + wheel_r * math.cos(a), cy + wheel_r * math.sin(a)),
+        wheel_r * 0.08, WHEEL_FLASH_COLOR)
+    rl.draw_circle(int(cx), int(cy), wheel_r * 0.12, WHEEL_FLASH_COLOR)
+    # 핸들 주변 작은 반짝이
     for i, (dx, dy) in enumerate(((-half_span - eye_w * 0.7, -eye_h * 0.7),
                                   (half_span + eye_w * 0.7, -eye_h * 0.6),
                                   (0.0, -eye_h * 0.9))):
@@ -656,8 +653,10 @@ class RobotFaceView(Widget):
       size = (6.0 + 8.0 * tw) * scale
       self._draw_sparkle(ax, ay, size, rl.Color(255, 255, 255, int(220 * tw)))
 
-  def _draw_chevrons(self, rect: rl.Rectangle, direction: int, now: float, lean_x: float, scale: float = 1.0) -> None:
-    """깜빡이 << >>: 방향 쪽 눈 옆에 이중 꺾쇠를 표시한다. 깜빡이처럼 점멸."""
+  def _draw_chevron(self, rect: rl.Rectangle, direction: int, now: float, lean_x: float, scale: float = 1.0) -> None:
+    """깜빡이 < >: 방향 쪽 눈 옆에 꺾쇠 한 개를 표시한다. 깜빡이처럼 점멸.
+    꺾쇠 각도는 90도 — 팁 오프셋(가로)이 세로 절반과 같아 두 선이 직각으로
+    만난다."""
     # 깜빡이 점멸: 0.5초 켜짐 / 0.5초 꺼짐
     if int(now * 2.0) % 2 == 1:
       return
@@ -670,12 +669,9 @@ class RobotFaceView(Widget):
     # 꺾쇠 크기·위치: 방향 쪽 눈 바깥
     size = eye_h * 0.35
     base_x = cx + direction * (half_span + eye_w * 0.85)
-    for k in range(2):
-      # 두 개의 꺾쇠를 방향 쪽으로 나란히 배치
-      ox = base_x + direction * k * size * 0.7
-      tip_x = ox + direction * size * 0.45
-      rl.draw_line_ex(rl.Vector2(ox, cy - size / 2.0), rl.Vector2(tip_x, cy), 10.0 * scale, CHEVRON_COLOR)
-      rl.draw_line_ex(rl.Vector2(tip_x, cy), rl.Vector2(ox, cy + size / 2.0), 10.0 * scale, CHEVRON_COLOR)
+    tip_x = base_x + direction * size * 0.5  # 90도: 팁 오프셋 = 세로 절반
+    rl.draw_line_ex(rl.Vector2(base_x, cy - size / 2.0), rl.Vector2(tip_x, cy), 10.0 * scale, CHEVRON_COLOR)
+    rl.draw_line_ex(rl.Vector2(tip_x, cy), rl.Vector2(base_x, cy + size / 2.0), 10.0 * scale, CHEVRON_COLOR)
 
   def _draw_hud(self, rect: rl.Rectangle, sig: _Signals, scale: float = 1.0) -> None:
     """인게이지 HUD: 핸들 아이콘·현재 속도·목표 속도·차간거리 (하단)."""
