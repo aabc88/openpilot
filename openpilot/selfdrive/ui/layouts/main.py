@@ -6,6 +6,7 @@ from openpilot.selfdrive.ui.layouts.sidebar import Sidebar, SIDEBAR_WIDTH
 from openpilot.selfdrive.ui.layouts.home import HomeLayout
 from openpilot.selfdrive.ui.layouts.settings.settings import SettingsLayout, PanelType
 from openpilot.selfdrive.ui.onroad.augmented_road_view import AugmentedRoadView
+from openpilot.selfdrive.ui.onroad.robot_face import RobotFaceView
 from openpilot.selfdrive.ui.carrot_param_cache import TimedSnapshotCache, read_screen_record
 from openpilot.selfdrive.ui.ui_state import device, ui_state
 from openpilot.selfdrive.ui.b1_badge import draw as draw_b1_badge
@@ -30,6 +31,8 @@ class MainLayout(Widget):
 
     # Initialize layouts
     self._layouts = {MainState.HOME: HomeLayout(), MainState.SETTINGS: SettingsLayout(), MainState.ONROAD: AugmentedRoadView()}
+    # 로봇 페이스 UI (ej): 토글이 켜지면 onroad 대신 얼굴 화면을 보여준다
+    self._robot_face = RobotFaceView()
 
     self._sidebar_rect = rl.Rectangle(0, 0, 0, 0)
     self._content_rect = rl.Rectangle(0, 0, 0, 0)
@@ -118,6 +121,7 @@ class MainLayout(Widget):
     self._layouts[MainState.HOME].set_settings_callback(lambda: self.open_settings(PanelType.TOGGLES))
     self._layouts[MainState.SETTINGS].set_callbacks(on_close=self._set_mode_for_state)
     self._layouts[MainState.ONROAD].set_click_callback(self._on_onroad_clicked)
+    self._robot_face.set_click_callback(self._on_onroad_clicked)
     device.add_interactive_timeout_callback(self._set_mode_for_state)
 
   def _update_layout_rects(self):
@@ -165,4 +169,7 @@ class MainLayout(Widget):
       self._sidebar.render(self._sidebar_rect)
 
     content_rect = self._content_rect if self._sidebar.is_visible else self._rect
-    self._layouts[self._current_mode].render(content_rect)
+    if self._current_mode == MainState.ONROAD and self._robot_face.is_face_mode:
+      self._robot_face.render(content_rect)
+    else:
+      self._layouts[self._current_mode].render(content_rect)

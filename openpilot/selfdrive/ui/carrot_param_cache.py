@@ -83,6 +83,12 @@ class RealtimeUiParamSnapshot:
   always_on_dm: bool = False
 
 
+@dataclass(frozen=True)
+class RobotFaceParamSnapshot:
+  enabled: bool = False
+  test: int = 0
+
+
 def read_border_params(params, params_memory) -> BorderParamSnapshot:
   car_name = params.get("CarName") or ""
   hyundai_camera_scc = params.get_int("HyundaiCameraSCC") > 0
@@ -116,3 +122,16 @@ def read_realtime_ui_params(params) -> RealtimeUiParamSnapshot:
 
 def read_screen_record(params) -> bool:
   return params.get_bool("ScreenRecord")
+
+
+def read_robot_face_params(params) -> RobotFaceParamSnapshot:
+  # 미등록 키(구 빌드) 등 오류 시 얼굴 UI 끔 + 실시간 모드로 폴백
+  try:
+    enabled = params.get_bool("RobotFaceUI")
+  except Exception:
+    enabled = False
+  try:
+    test = int(params.get_int("RobotFaceTest"))
+  except Exception:
+    test = 0
+  return RobotFaceParamSnapshot(enabled=bool(enabled), test=min(max(test, 0), 14))
