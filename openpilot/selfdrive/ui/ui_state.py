@@ -170,6 +170,12 @@ class UIState:
     elif not self.sm.alive["wideRoadCameraState"] or not self.sm.valid["wideRoadCameraState"]:
       self.light_sensor = -1
 
+    # ForceOnroad: offroad에서 onroad UI를 보기 위한 디버그용 강제 시동.
+    # hardwared가 deviceState.started를 True로 만드는 것과 함께 onroad 화면을
+    # 띄우고, 화면이 꺼지지 않도록 ignition도 True로 유지한다.
+    if self.params.get_bool("ForceOnroad"):
+      self.ignition = True
+
     # Update started state
     self.started = self.sm["deviceState"].started and self.ignition
 

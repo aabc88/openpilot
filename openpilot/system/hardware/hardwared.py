@@ -254,6 +254,12 @@ def hardware_thread(end_event, hw_queue) -> None:
         onroad_conditions["ignition"] = False
         cloudlog.error("panda timed out onroad")
 
+    # ForceOnroad: offroad에서 onroad UI를 보기 위한 디버그용 강제 시동.
+    # 판다 시동 신호와 무관하게 ignition을 True로 유지한다. 타임아웃 분기
+    # 뒤에 두어 강제 상태가 판다 타임아웃으로 꺼지지 않도록 한다.
+    if params.get_bool("ForceOnroad"):
+      onroad_conditions["ignition"] = True
+
     # Run at 2Hz, plus either edge of ignition
     ign_edge = (started_ts is not None) != all(onroad_conditions.values())
     if (sm.frame % round(SERVICE_LIST['pandaStates'].frequency * DT_HW) != 0) and not ign_edge:
