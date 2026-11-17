@@ -396,6 +396,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
 
     {"ForceOnroad", {CLEAR_ON_MANAGER_START, BOOL}},
 
+    {"ComfortBrake", {PERSISTENT, INT, "24"}},
+
     {"LateralTorqueCustom", {PERSISTENT, INT, "0"}},
     {"LateralTorqueAccelFactor", {PERSISTENT, INT, "2500"}},
     {"LateralTorqueFriction", {PERSISTENT, INT, "100"}},
