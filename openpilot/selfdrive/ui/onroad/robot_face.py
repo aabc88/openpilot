@@ -31,7 +31,8 @@ from enum import IntEnum
 import pyray as rl
 
 from openpilot.cereal import log
-from openpilot.selfdrive.ui.carrot_param_cache import RobotFaceParamSnapshot, TimedSnapshotCache, read_robot_face_params
+from openpilot.selfdrive.ui.carrot_param_cache import (RobotFaceParamSnapshot, TimedSnapshotCache,
+                                                      read_robot_face_params, write_robot_face_test)
 from openpilot.selfdrive.ui.onroad.alert_renderer import AlertRenderer
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.text_draw import draw_text_ui_style
@@ -287,9 +288,10 @@ class RobotFaceView(Widget):
       self._test_since = now
     if now - self._test_since < TEST_PREVIEW_SEC:
       return
-    # 10초 경과: 파라미터를 0으로 되돌려 일반 주행 화면으로 복귀
+    # 10초 경과: 파라미터를 0으로 되돌려 일반 화면으로 복귀.
+    # write_robot_face_test는 미등록 키(재빌드 전)면 백킹 파일에 직접 쓴다.
     try:
-      ui_state.params.put_int_nonblocking("RobotFaceTest", 0)
+      write_robot_face_test(ui_state.params, 0)
       self._params.store_pending(RobotFaceParamSnapshot(enabled=snap.enabled, test=0), now)
     except Exception:
       pass
