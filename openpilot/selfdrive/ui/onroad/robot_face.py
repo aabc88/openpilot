@@ -1,9 +1,12 @@
-"""Robot face onroad view (ej).
+"""Robot face view (ej).
 
-ej 탭의 로봇 얼굴 전환 토글(RobotFaceUI)을 켜면 주행 화면(카메라·모델·HUD)
-대신 차량 상태에 따라 표정이 바뀌는 로봇 얼굴을 표시한다. 표정은 눈(큰 캡슐형
-2개)의 모양·크기·움직임만으로 구분한다 (입·홍조·몸통 없음 — 미리보기에서
-확정한 디자인).
+ej 탭의 로봇 얼굴 전환 토글(RobotFaceUI)을 켜면 차량 상태에 따라 표정이
+바뀌는 로봇 얼굴을 표시한다. 주행 중에는 주행 화면(카메라·모델·HUD) 대신,
+offroad(책상)에서는 홈 화면 대신 얼굴이 나온다 — 시스템 강제 onroad 없이
+UI만으로 동작한다. 표정은 눈(큰 캡슐형 2개)의 모양·크기·움직임만으로
+구분한다 (입·홍조·몸통 없음 — 미리보기에서 확정한 디자인). offroad에서는
+차량 신호가 없어 실시간 표정은 평소로 고정되고, 표정 테스트로는 모든
+표정을 볼 수 있다.
 
 표정 우선순위 (위쪽이 이김):
   운전자 주의 > 급제동 > 후진 > 차선변경 > 깜빡이 > 클램프 보정 > 출발 >
@@ -241,6 +244,11 @@ class RobotFaceView(Widget):
       self._standstill_prev = sig.standstill
 
   def _pick_state(self, sig: _Signals, now: float) -> FaceState:
+    if not ui_state.started:
+      # offroad(책상)에서는 차량 신호가 없어 실시간 표정은 평소로 고정한다.
+      # (낡은 carState/modelV2 값으로 후진·신호 대기 등이 뜨는 것을 막는다.)
+      # 표정 테스트는 _update_state에서 먼저 처리되므로 그대로 동작한다.
+      return FaceState.IDLE
     if sig.dm_alert:
       return FaceState.DM_ALERT
     if sig.a_ego < HARD_BRAKE_AEGO:
@@ -289,8 +297,7 @@ class RobotFaceView(Widget):
     self._test_since = None
 
   def _render(self, rect: rl.Rectangle):
-    if not ui_state.started:
-      return
+    # started 게이트 없음: offroad(책상)에서도 얼굴을 표시한다.
     now = time.monotonic()
     state = self._face_state
     snap = self._params.value

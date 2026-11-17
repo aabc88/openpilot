@@ -20,14 +20,6 @@ from openpilot.system.hardware import HARDWARE, PC
 BACKLIGHT_OFFROAD = 65 if HARDWARE.get_device_type() == "mici" else 50
 
 
-def is_force_onroad_enabled(params) -> bool:
-  """ForceOnroad 파라미터 읽기. 미등록 키(구 빌드) 등 오류 시 False."""
-  try:
-    return params.get_bool("ForceOnroad")
-  except Exception:
-    return False
-
-
 class UIStatus(Enum):
   DISENGAGED = "disengaged"
   ENGAGED = "engaged"
@@ -178,12 +170,6 @@ class UIState:
     elif not self.sm.alive["wideRoadCameraState"] or not self.sm.valid["wideRoadCameraState"]:
       self.light_sensor = -1
 
-    # ForceOnroad: offroad에서 onroad UI를 보기 위한 디버그용 강제 시동.
-    # hardwared가 deviceState.started를 True로 만드는 것과 함께 onroad 화면을
-    # 띄우고, 화면이 꺼지지 않도록 ignition도 True로 유지한다.
-    if is_force_onroad_enabled(self.params):
-      self.ignition = True
-
     # Update started state
     self.started = self.sm["deviceState"].started and self.ignition
 
@@ -267,6 +253,7 @@ class Device:
     self._interactive_timeout_callbacks: list[Callable] = []
     self._prev_timed_out = False
     self._awake: bool = True
+    self._face_active: bool = False
 
     self._offroad_brightness: int = BACKLIGHT_OFFROAD
     self._last_brightness: int = 0
@@ -277,6 +264,12 @@ class Device:
   @property
   def awake(self) -> bool:
     return self._awake
+
+  def set_face_active(self, active: bool) -> None:
+    # 로봇 얼굴 표시 중에는 화면이 꺼지지 않도록 유지한다 (ej).
+    # MainLayout이 매 프레임 얼굴 표시 여부를 알려준다. offroad(책상)에서는
+    # 시동이 꺼져 있어 이 플래그가 없으면 30초 뒤 화면이 꺼진다.
+    self._face_active = active
 
   def set_override_interactive_timeout(self, timeout: int | None) -> None:
     # Override the interactive timeout duration temporarily
@@ -364,7 +357,7 @@ class Device:
         callback()
     self._prev_timed_out = interaction_timeout
 
-    self._set_awake(ui_state.ignition or not interaction_timeout or PC)
+    self._set_awake(ui_state.ignition or self._face_active or not interaction_timeout or PC)
 
   def _set_awake(self, on: bool):
     if on != self._awake:
