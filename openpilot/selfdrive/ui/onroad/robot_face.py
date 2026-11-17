@@ -28,6 +28,14 @@ RobotFaceTest 파라미터가 0이 아니면 실시간 상태와 무관하게 �
 
 안전 알림은 얼굴 위에 그대로 표시한다 (AlertRenderer 재사용). 급한 알림이
 뜨면 얼굴보다 알림이 먼저 보인다.
+
+화면 크기 대응: BIG_UI(2160x1080)와 mici(콤마4, 536x240) 두 화면에서
+공통으로 쓴다. 모든 절대 픽셀값(폰트·선 두께·HUD 아이콘·표정 오프셋)은
+REFERENCE_HEIGHT(1080) 기준값이고, _render에서 rect 높이에 비례한
+스케일을 곱한다. BIG_UI에서는 스케일 1.0으로 기존과 동일하게 그려지고,
+mici에서는 약 0.22배로 축소된다. 알림 렌더러는 화면별로 다르므로
+생성자에서 주입받는다 (기본값은 BIG_UI AlertRenderer, mici는
+mici/onroad/alert_renderer.AlertRenderer를 넘긴다).
 """
 
 import math
@@ -106,6 +114,13 @@ LEAN_MAX_PX = 80.0            # 커브 쏠림 최대 이동량 (px)
 LEAN_PER_LAT_ACCEL = 28.0     # 횡가속도 1 m/s²당 쏠림 (px)
 LAT_ACCEL_SHOW_MIN = 0.5      # 횡가속도 표시 최소값 (m/s²)
 HUD_GAP_REFRESH_SEC = 0.5     # 차간거리 파라미터 읽기 주기
+
+# 절대 픽셀값의 기준 화면 높이 (BIG_UI 1080). _render에서
+# scale = rect.height / REFERENCE_HEIGHT를 계산해 모든 절대값에 곱한다.
+# mici(240)에서는 약 0.22배로 축소된다. 0.1~2.0으로 클램프한다.
+REFERENCE_HEIGHT = 1080.0
+SCALE_MIN = 0.1
+SCALE_MAX = 2.0
 MS_TO_KPH = 3.6
 MS_TO_MPH = 2.23694
 KPH_TO_MPH = 0.621371
@@ -159,13 +174,18 @@ class _Signals:
 
 
 class RobotFaceView(Widget):
-  def __init__(self):
+  def __init__(self, alert_renderer_cls=None):
+    """alert_renderer_cls: 알림을 그릴 렌더러 클래스. None이면 BIG_UI
+    AlertRenderer를 쓰고, mici 레이아웃에서는 mici AlertRenderer를 넘긴다
+    (폰트·아이콘이 작은 화면용으로 따로 맞춰져 있다)."""
     super().__init__()
     self._params = TimedSnapshotCache(
       RobotFaceParamSnapshot(),
       lambda: read_robot_face_params(ui_state.params),
     )
-    self._alert_renderer = self._child(AlertRenderer())
+    if alert_renderer_cls is None:
+      alert_renderer_cls = AlertRenderer
+    self._alert_renderer = self._child(alert_renderer_cls())
     self._face_state = FaceState.IDLE
     self._lane_change_dir = 0
     self._sig = _Signals()
@@ -388,15 +408,17 @@ class RobotFaceView(Widget):
     self._test_prev = 0
     self._test_since = None
 
-  def _lean_offset(self, sig: _Signals) -> float:
+  def _lean_offset(self, sig: _Signals, scale: float = 1.0) -> float:
     """커브 쏠림: 도는 방향의 반대로 얼굴이 미끄러지는 양 (px).
-    양의 곡률 = 우회전 = 차체가 왼쪽으로 쏠림 (음의 x)."""
+    양의 곡률 = 우회전 = 차체가 왼쪽으로 쏠림 (음의 x).
+    scale을 곱해 작은 화면에서는 쏠림도 비례해 줄인다."""
     try:
       a_lat = sig.lat_accel
       if not math.isfinite(a_lat):
         return 0.0
-      shift = -a_lat * LEAN_PER_LAT_ACCEL
-      return max(-LEAN_MAX_PX, min(LEAN_MAX_PX, shift))
+      shift = -a_lat * LEAN_PER_LAT_ACCEL * scale
+      max_px = LEAN_MAX_PX * scale
+      return max(-max_px, min(max_px, shift))
     except Exception:
       return 0.0
 
@@ -407,30 +429,34 @@ class RobotFaceView(Widget):
     snap = self._params.value
     sig = self._sig
 
+    # 화면 스케일: 절대 픽셀값은 1080 높이 기준이므로 rect 높이에 비례해
+    # 조정한다. BIG_UI(1080)에서는 1.0, mici(240)에서는 약 0.22.
+    scale = max(SCALE_MIN, min(SCALE_MAX, rect.height / REFERENCE_HEIGHT))
+
     # 배경: 순수 검은 화면 (테두리 없음 — 콤마 화면 자체가 프레임이다)
     rl.draw_rectangle_rec(rect, rl.BLACK)
 
-    lean_x = self._lean_offset(sig)
+    lean_x = self._lean_offset(sig, scale)
 
     # 눈 (인게이지 직후 0.8초는 별눈)
     if state == FaceState.ENGAGED and now - self._engage_time < STAR_FLASH_SEC:
-      self._draw_star_eyes(rect, now, lean_x)
+      self._draw_star_eyes(rect, now, lean_x, scale)
     else:
-      self._draw_eyes(rect, state, now, lean_x)
+      self._draw_eyes(rect, state, now, lean_x, scale)
 
     # 반짝이
-    self._draw_sparkles(rect, state, now, lean_x)
+    self._draw_sparkles(rect, state, now, lean_x, scale)
 
     # 깜빡이 << >>
     if state == FaceState.BLINKER_LEFT:
-      self._draw_chevrons(rect, -1, now, lean_x)
+      self._draw_chevrons(rect, -1, now, lean_x, scale)
     elif state == FaceState.BLINKER_RIGHT:
-      self._draw_chevrons(rect, 1, now, lean_x)
+      self._draw_chevrons(rect, 1, now, lean_x, scale)
 
     # 인게이지 HUD (핸들·현재 속도·목표 속도·차간거리)
     if state == FaceState.ENGAGED:
       try:
-        self._draw_hud(rect, sig)
+        self._draw_hud(rect, sig, scale)
       except Exception:
         pass
 
@@ -439,7 +465,7 @@ class RobotFaceView(Widget):
       if ui_state.started and abs(sig.lat_accel) >= LAT_ACCEL_SHOW_MIN:
         draw_text_ui_style(f"횡가속도 {abs(sig.lat_accel):.1f} m/s²",
                            rect.x + rect.width / 2.0, rect.y + rect.height * 0.78,
-                           36.0, HUD_DIM, align="center_bottom")
+                           36.0 * scale, HUD_DIM, align="center_bottom")
     except Exception:
       pass
 
@@ -449,14 +475,15 @@ class RobotFaceView(Widget):
       if not snap.enabled and self._test_since is not None:
         remaining = max(0, int(math.ceil(TEST_PREVIEW_SEC - (now - self._test_since))))
         label += f" ({remaining}초 후 자동 복귀)"
-      draw_text_ui_style(label, rect.x + rect.width / 2.0, rect.y + rect.height - 30.0,
-                         40.0, rl.WHITE, align="center_bottom")
+      draw_text_ui_style(label, rect.x + rect.width / 2.0, rect.y + rect.height - 30.0 * scale,
+                         40.0 * scale, rl.WHITE, align="center_bottom")
 
     # 안전 알림은 얼굴 위에 그대로 표시
     self._alert_renderer.render(rect)
 
-  def _eye_transform(self, state: FaceState, now: float, eye_w: float, eye_h: float):
-    """(scale_x, scale_y, off_x, off_y, gaze_x)를 반환한다."""
+  def _eye_transform(self, state: FaceState, now: float, eye_w: float, eye_h: float, scale: float = 1.0):
+    """(scale_x, scale_y, off_x, off_y, gaze_x)를 반환한다.
+    절대 픽셀 오프셋(20/25/30/6/4/18)은 1080 기준값이므로 scale을 곱한다."""
     if state == FaceState.ENGAGED:
       return 1.0, 0.72, 0.0, -eye_h * 0.04, 0.0
     if state == FaceState.DISENGAGED:
@@ -468,20 +495,20 @@ class RobotFaceView(Widget):
     if state == FaceState.LANE_CHANGE:
       d = self._lane_change_dir
       if d != 0:
-        return 1.0, 1.0, d * 20.0, 0.0, d * eye_w * 0.4
-      return 1.0, 1.0, 25.0 * math.sin(2.0 * math.pi * now / 0.8), 0.0, 0.0
+        return 1.0, 1.0, d * 20.0 * scale, 0.0, d * eye_w * 0.4
+      return 1.0, 1.0, 25.0 * scale * math.sin(2.0 * math.pi * now / 0.8), 0.0, 0.0
     if state == FaceState.DEPARTING:
-      return 1.05, 1.05, 0.0, -30.0 * abs(math.sin(2.0 * math.pi * now / 0.8)), 0.0
+      return 1.05, 1.05, 0.0, -30.0 * scale * abs(math.sin(2.0 * math.pi * now / 0.8)), 0.0
     if state == FaceState.HARD_BRAKE:
-      jx = 6.0 * math.sin(2.0 * math.pi * now * 13.0)
-      jy = 4.0 * math.sin(2.0 * math.pi * now * 17.0 + 1.0)
+      jx = 6.0 * scale * math.sin(2.0 * math.pi * now * 13.0)
+      jy = 4.0 * scale * math.sin(2.0 * math.pi * now * 17.0 + 1.0)
       return 1.35, 1.35, jx, jy, 0.0
     if state == FaceState.DM_ALERT:
-      return 1.2, 1.2, 0.0, 0.0, 25.0 * math.sin(2.0 * math.pi * now / 0.7)
+      return 1.2, 1.2, 0.0, 0.0, 25.0 * scale * math.sin(2.0 * math.pi * now / 0.7)
     if state == FaceState.DM_CLEAR:
       return 1.0, 0.70, 0.0, -eye_h * 0.03, 0.0
     if state == FaceState.CLAMP:
-      nudge = 18.0 * math.sin(2.0 * math.pi * now / 0.9)
+      nudge = 18.0 * scale * math.sin(2.0 * math.pi * now / 0.9)
       return 1.0, 1.0, nudge, 0.0, nudge * 0.5
     if state == FaceState.WAITING:
       breathe = 1.0 + 0.02 * math.sin(2.0 * math.pi * now / 2.0)
@@ -489,11 +516,11 @@ class RobotFaceView(Widget):
     if state == FaceState.REVERSE:
       return 1.0, 0.85, 0.0, eye_h * 0.08, 0.0
     if state == FaceState.SLEEP:
-      breathe_y = 6.0 * math.sin(2.0 * math.pi * now / 2.5)
+      breathe_y = 6.0 * scale * math.sin(2.0 * math.pi * now / 2.5)
       return 1.0, 0.06, 0.0, breathe_y, 0.0
     return 1.0, 1.0, 0.0, 0.0, 0.0  # IDLE
 
-  def _eye_geometry(self, rect: rl.Rectangle, state: FaceState, now: float):
+  def _eye_geometry(self, rect: rl.Rectangle, state: FaceState, now: float, scale: float = 1.0):
     """눈 기본 크기·위치·변환을 계산한다.
     (eye_w, eye_h, half_span, scale_x, scale_y, off_x, off_y, gaze_x)를 반환."""
     eye_h = rect.height * 0.34
@@ -501,7 +528,7 @@ class RobotFaceView(Widget):
     gap = eye_w * 1.0  # 두 눈 사이 간격 ≈ 눈 한 개 너비
     half_span = eye_w / 2.0 + gap / 2.0
 
-    scale_x, scale_y, off_x, off_y, gaze_x = self._eye_transform(state, now, eye_w, eye_h)
+    scale_x, scale_y, off_x, off_y, gaze_x = self._eye_transform(state, now, eye_w, eye_h, scale)
 
     # 호흡: 급제동·운전자 주의·수면을 빼고 미세하게 커졌다 작아짐
     if state not in (FaceState.HARD_BRAKE, FaceState.DM_ALERT, FaceState.SLEEP):
@@ -510,7 +537,7 @@ class RobotFaceView(Widget):
       scale_y *= breathe
       # 시선 천천히 이동 (평소·인게이지에서만)
       if state in (FaceState.IDLE, FaceState.ENGAGED):
-        gaze_x += 6.0 * math.sin(2.0 * math.pi * now / 7.0)
+        gaze_x += 6.0 * scale * math.sin(2.0 * math.pi * now / 7.0)
 
     # 깜빡임 (급제동·운전자 주의·수면은 눈을 크게 뜨거나 감은 상태라 깜빡임 없음)
     if state not in (FaceState.HARD_BRAKE, FaceState.DM_ALERT, FaceState.SLEEP):
@@ -521,11 +548,11 @@ class RobotFaceView(Widget):
 
     return eye_w, eye_h, half_span, scale_x, scale_y, off_x, off_y, gaze_x
 
-  def _draw_eyes(self, rect: rl.Rectangle, state: FaceState, now: float, lean_x: float) -> None:
+  def _draw_eyes(self, rect: rl.Rectangle, state: FaceState, now: float, lean_x: float, scale: float = 1.0) -> None:
     cx = rect.x + rect.width / 2.0 + lean_x
     cy = rect.y + rect.height / 2.0
 
-    eye_w, eye_h, half_span, scale_x, scale_y, off_x, off_y, gaze_x = self._eye_geometry(rect, state, now)
+    eye_w, eye_h, half_span, scale_x, scale_y, off_x, off_y, gaze_x = self._eye_geometry(rect, state, now, scale)
 
     center_color, edge_color, glow_color = EYE_PALETTES.get(state, EYE_PALETTES[FaceState.IDLE])
     # 중간색 = 중심색과 가장자리색의 평균
@@ -534,7 +561,7 @@ class RobotFaceView(Widget):
                          (center_color.b + edge_color.b) // 2, 255)
 
     w = eye_w * scale_x
-    h = max(eye_h * scale_y, 4.0)  # 완전히 사라지지 않게 최소 높이 유지
+    h = max(eye_h * scale_y, 4.0 * scale)  # 완전히 사라지지 않게 최소 높이 유지
     base_y = cy - h / 2.0 + off_y
 
     for sign in (-1, 1):
@@ -552,7 +579,7 @@ class RobotFaceView(Widget):
       rl.draw_rectangle_rounded(
         rl.Rectangle(ex + (w - in_w) / 2.0, base_y + (h - in_h) / 2.0, in_w, in_h),
         0.55, 16, center_color)
-      if h < 20.0:
+      if h < 20.0 * scale:
         continue  # 눈이 거의 감겼으면 그림자·하이라이트 생략
       # 윗꺼풀 그림자 띠 (깊이감)
       band_w, band_h = w * 0.9, h * 0.28
@@ -575,7 +602,7 @@ class RobotFaceView(Widget):
       x2, y2 = points[(i + 1) % 10]
       rl.draw_line_ex(rl.Vector2(x1, y1), rl.Vector2(x2, y2), thickness, color)
 
-  def _draw_star_eyes(self, rect: rl.Rectangle, now: float, lean_x: float) -> None:
+  def _draw_star_eyes(self, rect: rl.Rectangle, now: float, lean_x: float, scale: float = 1.0) -> None:
     """인게이지 직후 별눈 플래시: 두 눈 자리에 큰 별 테두리 + 주변 반짝이."""
     cx = rect.x + rect.width / 2.0 + lean_x
     cy = rect.y + rect.height / 2.0
@@ -585,13 +612,13 @@ class RobotFaceView(Widget):
     half_span = eye_w / 2.0 + gap / 2.0
     radius = eye_h * 0.6
     for sign in (-1, 1):
-      self._draw_star(cx + sign * half_span, cy, radius, STAR_COLOR, 8.0)
+      self._draw_star(cx + sign * half_span, cy, radius, STAR_COLOR, 8.0 * scale)
     # 별 주변 작은 반짝이
     for i, (dx, dy) in enumerate(((-half_span - eye_w * 0.7, -eye_h * 0.7),
                                   (half_span + eye_w * 0.7, -eye_h * 0.6),
                                   (0.0, -eye_h * 0.9))):
       tw = 0.5 + 0.5 * math.sin(2.0 * math.pi * now * 3.0 + i * 2.1)
-      self._draw_sparkle(cx + dx, cy + dy, 8.0 + 6.0 * tw,
+      self._draw_sparkle(cx + dx, cy + dy, (8.0 + 6.0 * tw) * scale,
                          rl.Color(255, 255, 255, int(200 * tw)))
 
   def _draw_sparkle(self, cx: float, cy: float, size: float, color: rl.Color) -> None:
@@ -606,7 +633,7 @@ class RobotFaceView(Widget):
     rl.draw_triangle(rl.Vector2(cx + size * 0.7, cy), rl.Vector2(cx, cy - w), rl.Vector2(cx, cy + w), color)
     rl.draw_circle(int(cx), int(cy), max(w * 0.8, 1.0), color)
 
-  def _draw_sparkles(self, rect: rl.Rectangle, state: FaceState, now: float, lean_x: float) -> None:
+  def _draw_sparkles(self, rect: rl.Rectangle, state: FaceState, now: float, lean_x: float, scale: float = 1.0) -> None:
     """눈가에 드물게 떴다 사라지는 반짝이. 경고·수면 상태에서는 표시하지 않는다."""
     if state in (FaceState.HARD_BRAKE, FaceState.DM_ALERT, FaceState.SLEEP):
       return
@@ -626,10 +653,10 @@ class RobotFaceView(Widget):
       tw = math.sin(math.pi * phase)  # 0→1→0, 사이클마다 한 번 떴다 사라짐
       if tw <= 0.05:
         continue
-      size = 6.0 + 8.0 * tw
+      size = (6.0 + 8.0 * tw) * scale
       self._draw_sparkle(ax, ay, size, rl.Color(255, 255, 255, int(220 * tw)))
 
-  def _draw_chevrons(self, rect: rl.Rectangle, direction: int, now: float, lean_x: float) -> None:
+  def _draw_chevrons(self, rect: rl.Rectangle, direction: int, now: float, lean_x: float, scale: float = 1.0) -> None:
     """깜빡이 << >>: 방향 쪽 눈 옆에 이중 꺾쇠를 표시한다. 깜빡이처럼 점멸."""
     # 깜빡이 점멸: 0.5초 켜짐 / 0.5초 꺼짐
     if int(now * 2.0) % 2 == 1:
@@ -647,10 +674,10 @@ class RobotFaceView(Widget):
       # 두 개의 꺾쇠를 방향 쪽으로 나란히 배치
       ox = base_x + direction * k * size * 0.7
       tip_x = ox + direction * size * 0.45
-      rl.draw_line_ex(rl.Vector2(ox, cy - size / 2.0), rl.Vector2(tip_x, cy), 10.0, CHEVRON_COLOR)
-      rl.draw_line_ex(rl.Vector2(tip_x, cy), rl.Vector2(ox, cy + size / 2.0), 10.0, CHEVRON_COLOR)
+      rl.draw_line_ex(rl.Vector2(ox, cy - size / 2.0), rl.Vector2(tip_x, cy), 10.0 * scale, CHEVRON_COLOR)
+      rl.draw_line_ex(rl.Vector2(tip_x, cy), rl.Vector2(ox, cy + size / 2.0), 10.0 * scale, CHEVRON_COLOR)
 
-  def _draw_hud(self, rect: rl.Rectangle, sig: _Signals) -> None:
+  def _draw_hud(self, rect: rl.Rectangle, sig: _Signals, scale: float = 1.0) -> None:
     """인게이지 HUD: 핸들 아이콘·현재 속도·목표 속도·차간거리 (하단)."""
     try:
       is_metric = bool(ui_state.is_metric)
@@ -661,35 +688,35 @@ class RobotFaceView(Widget):
 
     # 핸들 아이콘 (왼쪽): 원 + 스포크 3개, 녹색
     wheel_x = rect.x + rect.width * 0.15
-    wheel_r = 35.0
+    wheel_r = 35.0 * scale
     rl.draw_circle_lines(int(wheel_x), int(hud_y), wheel_r, HUD_GREEN)
     for angle_deg in (90.0, 210.0, 330.0):
       a = math.radians(angle_deg)
       rl.draw_line_ex(
         rl.Vector2(wheel_x, hud_y),
         rl.Vector2(wheel_x + wheel_r * math.cos(a), hud_y + wheel_r * math.sin(a)),
-        6.0, HUD_GREEN)
-    rl.draw_circle(int(wheel_x), int(hud_y), 7.0, HUD_GREEN)
+        6.0 * scale, HUD_GREEN)
+    rl.draw_circle(int(wheel_x), int(hud_y), 7.0 * scale, HUD_GREEN)
 
     # 현재 속도 (가운데, 크게)
     speed_conv = MS_TO_KPH if is_metric else MS_TO_MPH
     speed_unit = "km/h" if is_metric else "mph"
     cur = max(0.0, sig.v_ego_display * speed_conv)
-    draw_text_ui_style(f"{int(round(cur))}", cx - 60.0, hud_y + 10.0, 90.0, HUD_TEXT,
+    draw_text_ui_style(f"{int(round(cur))}", cx - 60.0 * scale, hud_y + 10.0 * scale, 90.0 * scale, HUD_TEXT,
                        align="center_bottom")
-    draw_text_ui_style(speed_unit, cx - 60.0, hud_y + 55.0, 30.0, HUD_DIM,
+    draw_text_ui_style(speed_unit, cx - 60.0 * scale, hud_y + 55.0 * scale, 30.0 * scale, HUD_DIM,
                        align="center_bottom")
     # 목표 속도 (현재 속도 오른쪽, 작게)
     if sig.v_cruise_kph > 0.0:
       target = sig.v_cruise_kph if is_metric else sig.v_cruise_kph * KPH_TO_MPH
-      draw_text_ui_style("SET", cx + 130.0, hud_y - 25.0, 28.0, HUD_DIM,
+      draw_text_ui_style("SET", cx + 130.0 * scale, hud_y - 25.0 * scale, 28.0 * scale, HUD_DIM,
                          align="center_bottom")
-      draw_text_ui_style(f"{int(round(target))}", cx + 130.0, hud_y + 10.0, 55.0, HUD_TEXT,
+      draw_text_ui_style(f"{int(round(target))}", cx + 130.0 * scale, hud_y + 10.0 * scale, 55.0 * scale, HUD_TEXT,
                          align="center_bottom")
 
     # 차간거리 막대 (오른쪽): 4칸 중 채워진 칸 수 = 단계
     bar_x = rect.x + rect.width * 0.85
-    bar_w, bar_h, bar_gap = 18.0, 26.0, 8.0
+    bar_w, bar_h, bar_gap = 18.0 * scale, 26.0 * scale, 8.0 * scale
     for i in range(4):
       x = bar_x + i * (bar_w + bar_gap)
       color = HUD_GREEN if i < self._gap_level else rl.Color(255, 255, 255, 60)
