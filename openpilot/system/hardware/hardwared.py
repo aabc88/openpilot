@@ -178,6 +178,14 @@ class _CarParamsCache:
       self.is_tesla = False
 
 
+def is_force_onroad_enabled(params) -> bool:
+  """ForceOnroad 파라미터 읽기. 미등록 키(구 빌드) 등 오류 시 False."""
+  try:
+    return params.get_bool("ForceOnroad")
+  except Exception:
+    return False
+
+
 def hardware_thread(end_event, hw_queue) -> None:
   pm = messaging.PubMaster(['deviceState'])
   sm = messaging.SubMaster(["peripheralState", "gpsLocationExternal", "selfdriveState", "pandaStates"], poll="pandaStates")
@@ -257,7 +265,7 @@ def hardware_thread(end_event, hw_queue) -> None:
     # ForceOnroad: offroad에서 onroad UI를 보기 위한 디버그용 강제 시동.
     # 판다 시동 신호와 무관하게 ignition을 True로 유지한다. 타임아웃 분기
     # 뒤에 두어 강제 상태가 판다 타임아웃으로 꺼지지 않도록 한다.
-    if params.get_bool("ForceOnroad"):
+    if is_force_onroad_enabled(params):
       onroad_conditions["ignition"] = True
 
     # Run at 2Hz, plus either edge of ignition

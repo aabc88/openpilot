@@ -20,6 +20,14 @@ from openpilot.system.hardware import HARDWARE, PC
 BACKLIGHT_OFFROAD = 65 if HARDWARE.get_device_type() == "mici" else 50
 
 
+def is_force_onroad_enabled(params) -> bool:
+  """ForceOnroad 파라미터 읽기. 미등록 키(구 빌드) 등 오류 시 False."""
+  try:
+    return params.get_bool("ForceOnroad")
+  except Exception:
+    return False
+
+
 class UIStatus(Enum):
   DISENGAGED = "disengaged"
   ENGAGED = "engaged"
@@ -173,7 +181,7 @@ class UIState:
     # ForceOnroad: offroad에서 onroad UI를 보기 위한 디버그용 강제 시동.
     # hardwared가 deviceState.started를 True로 만드는 것과 함께 onroad 화면을
     # 띄우고, 화면이 꺼지지 않도록 ignition도 True로 유지한다.
-    if self.params.get_bool("ForceOnroad"):
+    if is_force_onroad_enabled(self.params):
       self.ignition = True
 
     # Update started state
