@@ -186,6 +186,20 @@ def is_force_onroad_enabled(params) -> bool:
     return False
 
 
+def get_fan_speed_percent(fan_controller, all_comp_temp: float, ignition: bool, force_onroad: bool) -> int:
+  """팬 속도(%) 결정. ForceOnroad(책상 테스트) 중에는 발열로 onroad가
+  꺼지지 않도록 최대 속도로 고정한다. 책상은 차량과 달리 공기 흐름이
+  없어 같은 부하에도 온도가 훨씬 빨리 오르고, 온도가 danger 밴드(107도)에
+  닿으면 device_temp_good이 꺼져 onroad가 중단된다. 팬 PID는 100도에서야
+  100%에 닿아 여유가 7도밖에 안 되지만, 처음부터 최대 속도로 돌리면
+  평형 온도가 낮아져 여유가 커진다. 열 보호(107도 offroad) 자체는
+  건드리지 않는다. PID 상태 유지를 위해 update()는 항상 호출한다."""
+  speed = fan_controller.update(all_comp_temp, ignition)
+  if force_onroad:
+    return 100
+  return speed
+
+
 def hardware_thread(end_event, hw_queue) -> None:
   pm = messaging.PubMaster(['deviceState'])
   sm = messaging.SubMaster(["peripheralState", "gpsLocationExternal", "selfdriveState", "pandaStates"], poll="pandaStates")
@@ -265,7 +279,9 @@ def hardware_thread(end_event, hw_queue) -> None:
     # ForceOnroad: offroad에서 onroad UI를 보기 위한 디버그용 강제 시동.
     # 판다 시동 신호와 무관하게 ignition을 True로 유지한다. 타임아웃 분기
     # 뒤에 두어 강제 상태가 판다 타임아웃으로 꺼지지 않도록 한다.
-    if is_force_onroad_enabled(params):
+    # force_onroad는 아래 팬 속도 결정에서도 재사용한다.
+    force_onroad = is_force_onroad_enabled(params)
+    if force_onroad:
       onroad_conditions["ignition"] = True
 
     # Run at 2Hz, plus either edge of ignition
@@ -313,7 +329,8 @@ def hardware_thread(end_event, hw_queue) -> None:
     all_comp_temp = all_temp_filter.update(max(temp_sources))
     msg.deviceState.maxTempC = all_comp_temp
 
-    msg.deviceState.fanSpeedPercentDesired = fan_controller.update(all_comp_temp, onroad_conditions["ignition"])
+    msg.deviceState.fanSpeedPercentDesired = get_fan_speed_percent(fan_controller, all_comp_temp,
+                                                                onroad_conditions["ignition"], force_onroad)
     # C3XL clones can keep their fan powered after the Panda has requested 0%.
     # Leave the supply enabled only while cooling is actually requested.
     if TICI:
