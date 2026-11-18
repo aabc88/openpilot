@@ -18,10 +18,10 @@ UI만으로 동작한다. 표정은 눈 2개의 모양·색·움직임만으로 
 
 표정 우선순위 (위쪽이 이김):
   운전자 주의 > 급제동 > 끼어들기 > 후진 > 앞차 근접 > 사각지대 >
-  차선 변경 ←/→ > 비상등 > 깜빡이 > 핸들 개입 > 가속 페달 개입 > 급가속 >
-  급커브 > 클램프 보정 > 앞차 출발 > 출발 인사 > 출발 > 주의 해제 >
-  디스인게이지 > 설정속도 ▲/▼ > 주차 > 정체 > 신호 대기 > 인게이지 > 평소
-출발 인사/출발/주의 해제/디스인게이지/앞차 출발/끼어들기/설정속도는
+  차선 변경 ←/→ > 비상등 > 깜빡이 > 가속 페달 개입 > 급가속 > 급커브 >
+  클램프 보정 > 앞차 출발 > 출발 인사 > 출발 > 주의 해제 > 디스인게이지 >
+  주차 > 정체 > 신호 대기 > 인게이지 > 평소
+출발 인사/출발/주의 해제/디스인게이지/앞차 출발/끼어들기는
 전이 후 2~3초간만 표시되는 일시 표정이다.
 앞차 근접은 레이더 앞차와의 충돌 예상 시간(TTC) 2초 미만일 때,
 정체는 10km/h 미만으로 앞차를 따라갈 때, 주차는 기어가 P일 때 뜬다.
@@ -93,9 +93,6 @@ class FaceState(IntEnum):
   GAS_OVERRIDE = 23      # 가속 페달 개입
   SHARP_CURVE = 24       # 급커브
   HAZARD = 25            # 비상등
-  STEER_OVERRIDE = 26    # 핸들 개입
-  SET_SPEED_UP = 27      # 설정속도 ▲
-  SET_SPEED_DOWN = 28    # 설정속도 ▼
 
 
 FACE_NAMES = {
@@ -124,9 +121,6 @@ FACE_NAMES = {
   FaceState.GAS_OVERRIDE: "가속 페달 개입",
   FaceState.SHARP_CURVE: "급커브",
   FaceState.HAZARD: "비상등",
-  FaceState.STEER_OVERRIDE: "핸들 개입",
-  FaceState.SET_SPEED_UP: "설정속도 ▲",
-  FaceState.SET_SPEED_DOWN: "설정속도 ▼",
 }
 
 # 운전자 주의 표정을 띄우는 이벤트 (selfdrived가 발행하는 onroadEvents 이름)
@@ -212,16 +206,12 @@ EYE_PALETTES = {
   FaceState.GAS_OVERRIDE: (rl.Color(255, 245, 220, 255), rl.Color(255, 170, 70, 255), rl.Color(255, 150, 50, 36)),
   FaceState.SHARP_CURVE: (rl.Color(220, 245, 255, 255), rl.Color(80, 180, 255, 255), rl.Color(60, 160, 255, 36)),
   FaceState.HAZARD: (rl.Color(255, 245, 220, 255), rl.Color(255, 180, 60, 255), rl.Color(255, 160, 40, 36)),
-  FaceState.STEER_OVERRIDE: (rl.Color(255, 240, 210, 255), rl.Color(255, 154, 60, 255), rl.Color(255, 140, 40, 36)),
-  FaceState.SET_SPEED_UP: (rl.Color(220, 255, 240, 255), rl.Color(110, 230, 170, 255), rl.Color(80, 220, 150, 36)),
-  FaceState.SET_SPEED_DOWN: (rl.Color(220, 255, 240, 255), rl.Color(110, 230, 170, 255), rl.Color(80, 220, 150, 36)),
 }
 
 SHADOW_BAND_COLOR = rl.Color(120, 80, 50, 45)   # 윗꺼풀 그림자 띠
 HIGHLIGHT_COLOR = rl.Color(255, 255, 255, 235)  # 큰 하이라이트
 HIGHLIGHT_SMALL_COLOR = rl.Color(255, 255, 255, 130)  # 작은 하이라이트
 WHEEL_FLASH_COLOR = rl.Color(110, 230, 170, 255)  # 인게이지 핸들 플래시 (밝은 민트)
-STEER_OVERRIDE_COLOR = rl.Color(255, 154, 60, 255)  # 핸들 개입 큰 핸들 (주황, #ff9a3c)
 LANE_LINE_COLOR = rl.Color(255, 255, 255, 90)  # 인게이지 차선 (희미한 흰색 점선)
 CHEVRON_RGB = (255, 165, 0)                     # 깜빡이 꺾쇠(< >) 색 (주황).
 # rl.ORANGE 같은 이름 있는 색 상수는 기기의 pyray에서 .r/.g/.b 속성이 없어
@@ -254,7 +244,6 @@ class _Signals:
   v_ego_display: float = 0.0  # HUD 표시용 속도 (m/s, 클러스터 우선)
   v_cruise_kph: float = 0.0   # 크루즈 목표 속도 (km/h, 0이면 미설정)
   gas_pressed: bool = False  # 운전자가 가속 페달 밟음 (carState.gasPressed)
-  steering_pressed: bool = False  # 운전자가 핸들 잡고 있음 (carState.steeringPressed)
   hazard: bool = False       # 비상등 (좌우 깜빡이 동시)
   blind_spot: bool = False   # 사각지대 차량 (carState left/rightBlindspot)
   blind_spot_dir: int = 0    # -1 좌, +1 우, 0 양쪽/모름
@@ -296,9 +285,6 @@ class RobotFaceView(Widget):
     self._lead_v_prev: float | None = None
     self._cut_in_time = -1e9
     self._lead_depart_time = -1e9
-    self._v_cruise_prev: float | None = None
-    self._set_speed_up_time = -1e9
-    self._set_speed_down_time = -1e9
 
     # 테스트 자동 복귀 추적
     self._test_prev = 0
@@ -358,10 +344,6 @@ class RobotFaceView(Widget):
       sig.hazard = sig.left_blinker and sig.right_blinker
       try:
         sig.gas_pressed = bool(cs.gasPressed)
-      except Exception:
-        pass
-      try:
-        sig.steering_pressed = bool(cs.steeringPressed)
       except Exception:
         pass
       # 사각지대: 현대 인터페이스가 BSD 신호를 파싱하지 않아 K8에서는
@@ -532,18 +514,6 @@ class RobotFaceView(Widget):
     else:
       self._lead_v_prev = None
 
-    # 설정속도 변경: 크루즈 목표 속도가 오르거나 내림 (0이면 미설정이라 무시)
-    if self._v_cruise_prev is None:
-      self._v_cruise_prev = sig.v_cruise_kph
-    elif sig.v_cruise_kph != 0.0 and self._v_cruise_prev != 0.0:
-      if sig.v_cruise_kph > self._v_cruise_prev:
-        self._set_speed_up_time = now
-      elif sig.v_cruise_kph < self._v_cruise_prev:
-        self._set_speed_down_time = now
-      self._v_cruise_prev = sig.v_cruise_kph
-    else:
-      self._v_cruise_prev = sig.v_cruise_kph
-
   def _pick_state(self, sig: _Signals, now: float) -> FaceState:
     if not ui_state.started:
       # offroad(책상)에서는 차량 신호가 없어 실시간 표정은 평소로 고정한다.
@@ -579,8 +549,6 @@ class RobotFaceView(Widget):
       return FaceState.BLINKER_LEFT
     if sig.right_blinker:
       return FaceState.BLINKER_RIGHT
-    if sig.steering_pressed and sig.engaged:
-      return FaceState.STEER_OVERRIDE
     if sig.gas_pressed and sig.engaged:
       return FaceState.GAS_OVERRIDE
     if sig.a_ego > HARD_ACCEL_AEGO:
@@ -599,10 +567,6 @@ class RobotFaceView(Widget):
       return FaceState.DM_CLEAR
     if now - self._disengage_time < TRANSIENT_SEC:
       return FaceState.DISENGAGED
-    if now - self._set_speed_up_time < TRANSIENT_SHORT_SEC:
-      return FaceState.SET_SPEED_UP
-    if now - self._set_speed_down_time < TRANSIENT_SHORT_SEC:
-      return FaceState.SET_SPEED_DOWN
     if sig.parked:
       return FaceState.PARKED
     if sig.traffic_jam:
@@ -679,15 +643,6 @@ class RobotFaceView(Widget):
       except Exception:
         pass
 
-    # 핸들 개입: 눈 뒤에 중앙 큰 주황 핸들을 그린다
-    if state == FaceState.STEER_OVERRIDE:
-      try:
-        cx = rect.x + rect.width / 2.0 + lean_x
-        cy = rect.y + rect.height / 2.0
-        self._draw_wheel(cx, cy, rect.height * 0.34 * 0.7, STEER_OVERRIDE_COLOR)
-      except Exception:
-        pass
-
     # 눈 (인게이지 직후 0.8초는 핸들 플래시)
     if state == FaceState.ENGAGED and now - self._engage_time < ENGAGE_FLASH_SEC:
       self._draw_wheel_flash(rect, now, lean_x, motion_scale)
@@ -714,14 +669,6 @@ class RobotFaceView(Widget):
         self._draw_chevron(rect, 1, now + CHEVRON_SWEEP_SEC / 2.0, lean_x, motion_scale)
     except Exception:
       pass
-
-    # 설정속도 화살표: 눈 위에 ▲/▼ 삼각형을 그린다
-    if state in (FaceState.SET_SPEED_UP, FaceState.SET_SPEED_DOWN):
-      try:
-        self._draw_set_speed_arrow(rect, 1 if state == FaceState.SET_SPEED_UP else -1,
-                                   lean_x, motion_scale)
-      except Exception:
-        pass
 
     # 인게이지 HUD (핸들·현재 속도·목표 속도·차간거리)
     if state == FaceState.ENGAGED:
@@ -831,15 +778,6 @@ class RobotFaceView(Widget):
       return 1.15, 0.90, 0.0, 0.0, 0.0
     if state == FaceState.HAZARD:
       return 1.0, 1.0, 0.0, 0.0, 0.0
-    if state == FaceState.STEER_OVERRIDE:
-      # 놀람: 커진 눈 (중앙 큰 핸들은 _render에서 따로 그림)
-      return 1.15, 1.15, 0.0, 0.0, 0.0
-    if state == FaceState.SET_SPEED_UP:
-      # 위를 봄 (속도 올림)
-      return 1.0, 0.90, 0.0, -eye_h * 0.05, 0.0
-    if state == FaceState.SET_SPEED_DOWN:
-      # 아래를 봄 (속도 내림)
-      return 1.0, 0.90, 0.0, eye_h * 0.05, 0.0
     return 1.0, 1.0, 0.0, 0.0, 0.0  # IDLE
 
   def _eye_geometry(self, rect: rl.Rectangle, state: FaceState, now: float, scale: float = 1.0):
@@ -986,12 +924,12 @@ class RobotFaceView(Widget):
 
   def _draw_sparkles(self, rect: rl.Rectangle, state: FaceState, now: float, lean_x: float, scale: float = 1.0) -> None:
     """눈가에 드물게 떴다 사라지는 반짝이. 경고·주차 상태에서는 표시하지
-    않고, 급가속(속도선이 대신함)·정체(지루한 표정)·핸들 개입(큰 핸들이
-    대신함)·비상등(양쪽 화살표가 대신함)에서도 표시하지 않는다."""
+    않고, 급가속(속도선이 대신함)·정체(지루한 표정)·비상등(양쪽 화살표가
+    대신함)에서도 표시하지 않는다."""
     if state in (FaceState.HARD_BRAKE, FaceState.DM_ALERT,
                  FaceState.HARD_ACCEL, FaceState.LEAD_CLOSE, FaceState.TRAFFIC_JAM,
                  FaceState.PARKED, FaceState.CUT_IN, FaceState.BLIND_SPOT,
-                 FaceState.STEER_OVERRIDE, FaceState.HAZARD):
+                 FaceState.HAZARD):
       return
     cx = rect.x + rect.width / 2.0 + lean_x
     cy = rect.y + rect.height / 2.0
@@ -1071,23 +1009,6 @@ class RobotFaceView(Widget):
         y0 = top_y + (bottom_y - top_y) * p0
         y1 = top_y + (bottom_y - top_y) * p1
         rl.draw_line_ex(rl.Vector2(x0, y0), rl.Vector2(x1, y1), thickness, LANE_LINE_COLOR)
-
-  def _draw_set_speed_arrow(self, rect: rl.Rectangle, direction: int, lean_x: float, scale: float = 1.0) -> None:
-    """설정속도 화살표: 눈 위에 ▲(올림)/▼(내림) 삼각형을 그린다.
-    direction +1이면 위쪽, -1이면 아래쪽 삼각형."""
-    cx = rect.x + rect.width / 2.0 + lean_x
-    cy = rect.y + rect.height * 0.12
-    size = 40.0 * scale
-    if direction > 0:
-      rl.draw_triangle(rl.Vector2(cx, cy - size * 0.6),
-                       rl.Vector2(cx - size * 0.5, cy + size * 0.4),
-                       rl.Vector2(cx + size * 0.5, cy + size * 0.4),
-                       HUD_GREEN)
-    else:
-      rl.draw_triangle(rl.Vector2(cx, cy + size * 0.6),
-                       rl.Vector2(cx - size * 0.5, cy - size * 0.4),
-                       rl.Vector2(cx + size * 0.5, cy - size * 0.4),
-                       HUD_GREEN)
 
   def _draw_hud(self, rect: rl.Rectangle, sig: _Signals, scale: float = 1.0) -> None:
     """인게이지 HUD: 핸들 아이콘·현재 속도·목표 속도·차간거리 (하단).
