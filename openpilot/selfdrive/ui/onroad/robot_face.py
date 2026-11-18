@@ -438,7 +438,10 @@ class RobotFaceView(Widget):
       return FaceState.PARKED
     if sig.traffic_jam:
       return FaceState.TRAFFIC_JAM
-    if sig.standstill or sig.v_ego < 0.1:
+    # 신호 대기: 인게이지 중이 아닐 때만. 크루즈로 정지(인게이지 + 정지)하면
+    # WAITING으로 전환하지 않고 ENGAGED를 유지해 HUD가 계속 보인다.
+    # 정지 표시는 눈 크기만 작아지는 것으로 대신한다 (_eye_transform 참조).
+    if (sig.standstill or sig.v_ego < 0.1) and not sig.engaged:
       return FaceState.WAITING
     if sig.engaged:
       return FaceState.ENGAGED
@@ -549,6 +552,11 @@ class RobotFaceView(Widget):
     """(scale_x, scale_y, off_x, off_y, gaze_x)를 반환한다.
     절대 픽셀 오프셋(20/25/30/6/4/18)은 1080 기준값이므로 scale을 곱한다."""
     if state == FaceState.ENGAGED:
+      # 크루즈 정지(인게이지 + 정지): WAITING으로 전환하지 않고 눈만 작게.
+      # 색은 민트 그대로, HUD도 계속 보인다.
+      sig = self._sig
+      if sig.standstill or sig.v_ego < 0.1:
+        return 1.0, 0.55, 0.0, -eye_h * 0.04, 0.0
       return 1.0, 0.72, 0.0, -eye_h * 0.04, 0.0
     if state == FaceState.DISENGAGED:
       return 1.0, 0.60, 0.0, eye_h * 0.03, 0.0
@@ -797,9 +805,12 @@ class RobotFaceView(Widget):
     hud_y = rect.y + rect.height * 0.88
     cx = rect.x + rect.width / 2.0
 
-    # 핸들 아이콘 (왼쪽): 두꺼운 림 + 스포크 3개 + 허브, 녹색
+    # 핸들 아이콘 (왼쪽): 두꺼운 림 + 스포크 3개 + 허브, 녹색.
+    # 반지름 70으로 두 배 키움. hud_y(0.88)에 두면 하단이 잘리므로
+    # 중심을 0.82로 올려 화면 안에 들어간다 (눈과는 가로로 떨어져 있음).
     wheel_x = rect.x + rect.width * 0.15
-    self._draw_wheel(wheel_x, hud_y, 35.0 * scale, HUD_GREEN)
+    wheel_y = rect.y + rect.height * 0.82
+    self._draw_wheel(wheel_x, wheel_y, 70.0 * scale, HUD_GREEN)
 
     # 현재 속도 (가운데, 크게)
     speed_conv = MS_TO_KPH if is_metric else MS_TO_MPH
@@ -820,11 +831,9 @@ class RobotFaceView(Widget):
                          align="center_bottom")
 
     # 차간거리 막대 (오른쪽): 4칸 중 채워진 칸 수 = 단계.
-    # 막대가 작아 안 보인다는 피드백으로 18x26에서 26x40으로 키움
-    # (mici 0.6배: 15.6x24px). 시작 위치도 0.85에서 0.84로 당겨
-    # 오른쪽 여백을 확보한다.
+    # 높이만 40에서 48로 키움 (너비는 26 유지, mici 0.6배: 15.6x28.8px).
     bar_x = rect.x + rect.width * 0.84
-    bar_w, bar_h, bar_gap = 26.0 * scale, 40.0 * scale, 8.0 * scale
+    bar_w, bar_h, bar_gap = 26.0 * scale, 48.0 * scale, 8.0 * scale
     for i in range(4):
       x = bar_x + i * (bar_w + bar_gap)
       color = HUD_GREEN if i < self._gap_level else rl.Color(255, 255, 255, 60)
