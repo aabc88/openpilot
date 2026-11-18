@@ -528,11 +528,12 @@ class RobotFaceView(Widget):
         pass
 
     # 횡가속도 표시 (커브 중, onroad에서만). 커진 HUD와 겹치지 않게 위쪽에 표시.
+    # 글자를 키우고(36→48) 위치를 조금 더 위로(0.20→0.18) 올림.
     try:
       if ui_state.started and abs(sig.lat_accel) >= LAT_ACCEL_SHOW_MIN:
         draw_text_ui_style(f"횡가속도 {abs(sig.lat_accel):.1f} m/s²",
-                           rect.x + rect.width / 2.0, rect.y + rect.height * 0.20,
-                           36.0 * hud_scale, HUD_DIM, align="center_bottom")
+                           rect.x + rect.width / 2.0, rect.y + rect.height * 0.18,
+                           48.0 * hud_scale, HUD_DIM, align="center_bottom")
     except Exception:
       pass
 
