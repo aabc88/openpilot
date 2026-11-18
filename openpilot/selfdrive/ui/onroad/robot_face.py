@@ -161,6 +161,9 @@ MOTION_SCALE_MIN = 0.5        # 움직임 최소 스케일. 화면 높이 비례
 # 움직임(쏠림·오프셋·시선·반짝이·꺾쇠·속도선)은 0.5배 아래로 줄이지 않는다
 # (mici: 횡가속 1m/s²당 쏠림 35px·최대 90px, BIG_UI에서는 scale 1.0이라 그대로).
 LAT_ACCEL_SHOW_MIN = 0.5      # 횡가속도 표시 최소값 (m/s²)
+LANE_FLOW_PER_METER = 0.09    # 인게이지 차선 흐름: 이동 1m당 점선 패턴 진행도.
+# 50km/h(13.9m/s)에서 한 바퀴 0.8초, 100km/h에서 0.4초, 25km/h에서 1.6초,
+# 정지(0km/h)에서는 멈춘다. 속도에 비례해 차선이 흐르는 느낌을 준다.
 HUD_GAP_REFRESH_SEC = 0.5     # 차간거리 파라미터 읽기 주기
 HUD_SCALE_MIN = 0.6           # HUD 최소 스케일. 화면 높이에 비례한 scale을
 # 그대로 쓰면 mici(0.22배)에서 속도 글자가 20px·핸들 반지름 8px로 너무
@@ -294,6 +297,10 @@ class RobotFaceView(Widget):
     self._gap_level = 3
     self._gap_next_refresh = 0.0
     self._v_ego_cluster_seen = False
+
+    # 인게이지 차선 흐름 누적 (속도 감응). 0~1 사이를 순환한다.
+    self._lane_flow = 0.0
+    self._lane_flow_time: float | None = None
 
   @property
   def is_face_mode(self) -> bool:
@@ -636,10 +643,17 @@ class RobotFaceView(Widget):
 
     lean_x = self._lean_offset(sig, motion_scale)
 
-    # 인게이지 차선: 눈 뒤에 점선 차선을 그려 도로 위 주행감을 준다
+    # 인게이지 차선: 눈 뒤에 점선 차선을 그려 도로 위 주행감을 준다.
+    # 흐름은 속도에 비례한다 — 정지하면 멈추고, 빠를수록 빨리 흐른다.
+    # dt가 크면(첫 프레임·일시 정지 후) 0.1초로 제한해 점선이 튀지 않게 한다.
+    if self._lane_flow_time is None:
+      self._lane_flow_time = now
+    dt = min(max(now - self._lane_flow_time, 0.0), 0.1)
+    self._lane_flow_time = now
     if state == FaceState.ENGAGED:
+      self._lane_flow = (self._lane_flow + dt * max(sig.v_ego, 0.0) * LANE_FLOW_PER_METER) % 1.0
       try:
-        self._draw_lane_lines(rect, now, lean_x, motion_scale)
+        self._draw_lane_lines(rect, lean_x, motion_scale)
       except Exception:
         pass
 
@@ -984,9 +998,10 @@ class RobotFaceView(Widget):
       rl.draw_line_ex(rl.Vector2(base_x, cy - size / 2.0), rl.Vector2(tip_x, cy), thickness, color)
       rl.draw_line_ex(rl.Vector2(tip_x, cy), rl.Vector2(base_x, cy + size / 2.0), thickness, color)
 
-  def _draw_lane_lines(self, rect: rl.Rectangle, now: float, lean_x: float, scale: float = 1.0) -> None:
+  def _draw_lane_lines(self, rect: rl.Rectangle, lean_x: float, scale: float = 1.0) -> None:
     """인게이지 차선: 눈 좌우에 원근감 있는 점선 차선 2개. 아래로 넓어지고
-    점선이 아래로 흘러가 차가 앞으로 나아가는 느낌을 준다. 눈 뒤에 그린다."""
+    점선이 아래로 흘러가 차가 앞으로 나아가는 느낌을 준다. 눈 뒤에 그린다.
+    흐름 속도(_lane_flow)는 _render에서 속도에 비례해 누적한다."""
     cx = rect.x + rect.width / 2.0 + lean_x
     top_y = rect.y + rect.height * 0.15
     bottom_y = rect.y + rect.height * 0.95
@@ -994,9 +1009,9 @@ class RobotFaceView(Widget):
     top_off = rect.width * 0.28
     bottom_off = rect.width * 0.45
     thickness = 6.0 * scale
-    # 점선: 8개 구간, 시간에 따라 아래로 흐른다 (0.8초에 한 칸)
+    # 점선: 8개 구간, 속도 감응 흐름(_lane_flow)에 따라 아래로 흐른다
     segments = 8
-    flow = (now % 0.8) / 0.8
+    flow = self._lane_flow
     for sign in (-1, 1):
       for i in range(segments):
         # 각 점선 조각의 시작/끝 진행도 (흐름 오프셋 적용, 끝에서 다시 위로)
