@@ -132,12 +132,12 @@ SPARKLE_PERIOD_SEC = 3.0      # 반짝이 깜빡임 사이클
 CHEVRON_SWEEP_SEC = 1.2       # 깜빡이 화살표 이동 주기 (눈 옆 → 화면 끝)
 CHEVRON_COUNT = 3             # 동시에 이동하는 화살표 개수 (경로에 균등 배치)
 CHEVRON_FADE = 0.1            # 이동 시작/끝에서 페이드 인/아웃하는 진행도 구간
-LEAN_MAX_PX = 120.0           # 커브 쏠림 최대 이동량 (px)
-LEAN_PER_LAT_ACCEL = 40.0     # 횡가속도 1 m/s²당 쏠림 (px)
+LEAN_MAX_PX = 180.0           # 커브 쏠림 최대 이동량 (px)
+LEAN_PER_LAT_ACCEL = 70.0     # 횡가속도 1 m/s²당 쏠림 (px)
 MOTION_SCALE_MIN = 0.5        # 움직임 최소 스케일. 화면 높이 비례 scale을
 # 그대로 쓰면 mici(0.22배)에서 쏠림·시선·떨림이 1~6px이 돼 눈에 안 보인다.
 # 움직임(쏠림·오프셋·시선·반짝이·꺾쇠·속도선)은 0.5배 아래로 줄이지 않는다
-# (mici: 횡가속 1m/s²당 쏠림 20px·최대 60px, BIG_UI에서는 scale 1.0이라 그대로).
+# (mici: 횡가속 1m/s²당 쏠림 35px·최대 90px, BIG_UI에서는 scale 1.0이라 그대로).
 LAT_ACCEL_SHOW_MIN = 0.5      # 횡가속도 표시 최소값 (m/s²)
 HUD_GAP_REFRESH_SEC = 0.5     # 차간거리 파라미터 읽기 주기
 HUD_SCALE_MIN = 0.6           # HUD 최소 스케일. 화면 높이에 비례한 scale을
