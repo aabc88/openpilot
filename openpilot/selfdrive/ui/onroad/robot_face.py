@@ -128,6 +128,9 @@ ENGAGE_FLASH_SEC = 0.8        # 인게이지 시 핸들 플래시 표시 시간
 BREATHE_PERIOD_SEC = 2.5      # 호흡(미세한 커짐/작아짐) 주기
 SPARKLE_COUNT = 3             # 반짝이 개수
 SPARKLE_PERIOD_SEC = 3.0      # 반짝이 깜빡임 사이클
+CHEVRON_SWEEP_SEC = 1.2       # 깜빡이 화살표 이동 주기 (눈 옆 → 화면 끝)
+CHEVRON_TRAIL = ((0.0, 255), (-0.15, 110), (-0.30, 45))  # 잔상: (진행도 오프셋, 알파)
+CHEVRON_FADE = 0.1            # 이동 시작/끝에서 페이드 인/아웃하는 진행도 구간
 LEAN_MAX_PX = 120.0           # 커브 쏠림 최대 이동량 (px)
 LEAN_PER_LAT_ACCEL = 40.0     # 횡가속도 1 m/s²당 쏠림 (px)
 MOTION_SCALE_MIN = 0.5        # 움직임 최소 스케일. 화면 높이 비례 scale을
@@ -782,24 +785,39 @@ class RobotFaceView(Widget):
       self._draw_sparkle(ax, ay, size, rl.Color(255, 255, 255, int(220 * tw)))
 
   def _draw_chevron(self, rect: rl.Rectangle, direction: int, now: float, lean_x: float, scale: float = 1.0) -> None:
-    """깜빡이 < >: 방향 쪽 눈 옆에 꺾쇠 한 개를 표시한다. 깜빡이처럼 점멸.
+    """깜빡이 < >: 눈 옆에서 시작해 신호 방향으로 화면 끝까지 이동한다.
+    잔상(알파가 옅은 뒤쪽 화살표 2개)을 남기며 1.2초 주기로 반복하고,
+    시작/끝 구간에서 페이드 인/아웃해 끊기지 않게 이어진다.
     꺾쇠 각도는 90도 — 팁 오프셋(가로)이 세로 절반과 같아 두 선이 직각으로
-    만난다."""
-    # 깜빡이 점멸: 0.5초 켜짐 / 0.5초 꺼짐
-    if int(now * 2.0) % 2 == 1:
-      return
+    만난다. 점멸 대신 이동 자체가 깜빡이 신호다."""
     cx = rect.x + rect.width / 2.0 + lean_x
     cy = rect.y + rect.height / 2.0
     eye_h = rect.height * 0.34
     eye_w = eye_h * 0.8
     gap = eye_w * 1.0
     half_span = eye_w / 2.0 + gap / 2.0
-    # 꺾쇠 크기·위치: 방향 쪽 눈 바깥
     size = eye_h * 0.35
-    base_x = cx + direction * (half_span + eye_w * 0.85)
-    tip_x = base_x + direction * size * 0.5  # 90도: 팁 오프셋 = 세로 절반
-    rl.draw_line_ex(rl.Vector2(base_x, cy - size / 2.0), rl.Vector2(tip_x, cy), 10.0 * scale, CHEVRON_COLOR)
-    rl.draw_line_ex(rl.Vector2(tip_x, cy), rl.Vector2(base_x, cy + size / 2.0), 10.0 * scale, CHEVRON_COLOR)
+    # 시작 위치: 눈에서 충분히 떨어진 곳 (눈 바깥 가장자리 + eye_w의 0.7배 여유)
+    start_x = cx + direction * (half_span + eye_w * 1.2)
+    # 끝 위치: 화면 가장자리에서 약간 안쪽 (팁이 화면을 벗어나지 않게 size/2 여유)
+    margin = 24.0 * scale + size * 0.5
+    end_x = rect.x + margin if direction < 0 else rect.x + rect.width - margin
+    thickness = 10.0 * scale
+    p = (now % CHEVRON_SWEEP_SEC) / CHEVRON_SWEEP_SEC
+    for dp, base_alpha in CHEVRON_TRAIL:
+      pp = p + dp
+      if pp < 0:
+        continue  # 아직 출발하지 않은 잔상은 그리지 않음
+      # 시작/끝 페이드: 이동 시작과 끝에서 알파를 서서히 올리고 내림
+      fade = min(pp / CHEVRON_FADE, (1.0 - pp) / CHEVRON_FADE, 1.0)
+      alpha = int(base_alpha * fade)
+      if alpha <= 0:
+        continue
+      base_x = start_x + (end_x - start_x) * pp
+      tip_x = base_x + direction * size * 0.5  # 90도: 팁 오프셋 = 세로 절반
+      color = rl.Color(CHEVRON_COLOR.r, CHEVRON_COLOR.g, CHEVRON_COLOR.b, alpha)
+      rl.draw_line_ex(rl.Vector2(base_x, cy - size / 2.0), rl.Vector2(tip_x, cy), thickness, color)
+      rl.draw_line_ex(rl.Vector2(tip_x, cy), rl.Vector2(base_x, cy + size / 2.0), thickness, color)
 
   def _draw_hud(self, rect: rl.Rectangle, sig: _Signals, scale: float = 1.0) -> None:
     """인게이지 HUD: 핸들 아이콘·현재 속도·목표 속도·차간거리 (하단).
