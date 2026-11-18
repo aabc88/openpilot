@@ -128,8 +128,12 @@ ENGAGE_FLASH_SEC = 0.8        # 인게이지 시 핸들 플래시 표시 시간
 BREATHE_PERIOD_SEC = 2.5      # 호흡(미세한 커짐/작아짐) 주기
 SPARKLE_COUNT = 3             # 반짝이 개수
 SPARKLE_PERIOD_SEC = 3.0      # 반짝이 깜빡임 사이클
-LEAN_MAX_PX = 80.0            # 커브 쏠림 최대 이동량 (px)
-LEAN_PER_LAT_ACCEL = 28.0     # 횡가속도 1 m/s²당 쏠림 (px)
+LEAN_MAX_PX = 120.0           # 커브 쏠림 최대 이동량 (px)
+LEAN_PER_LAT_ACCEL = 40.0     # 횡가속도 1 m/s²당 쏠림 (px)
+MOTION_SCALE_MIN = 0.5        # 움직임 최소 스케일. 화면 높이 비례 scale을
+# 그대로 쓰면 mici(0.22배)에서 쏠림·시선·떨림이 1~6px이 돼 눈에 안 보인다.
+# 움직임(쏠림·오프셋·시선·반짝이·꺾쇠·속도선)은 0.5배 아래로 줄이지 않는다
+# (mici: 횡가속 1m/s²당 쏠림 20px·최대 60px, BIG_UI에서는 scale 1.0이라 그대로).
 LAT_ACCEL_SHOW_MIN = 0.5      # 횡가속도 표시 최소값 (m/s²)
 HUD_GAP_REFRESH_SEC = 0.5     # 차간거리 파라미터 읽기 주기
 HUD_SCALE_MIN = 0.6           # HUD 최소 스케일. 화면 높이에 비례한 scale을
@@ -472,7 +476,7 @@ class RobotFaceView(Widget):
   def _lean_offset(self, sig: _Signals, scale: float = 1.0) -> float:
     """커브 쏠림: 도는 방향의 반대로 얼굴이 미끄러지는 양 (px).
     양의 곡률 = 우회전 = 차체가 왼쪽으로 쏠림 (음의 x).
-    scale을 곱해 작은 화면에서는 쏠림도 비례해 줄인다."""
+    _render에서 motion_scale(0.5 하한)을 넘겨 작은 화면에서도 쏠림이 보인다."""
     try:
       a_lat = sig.lat_accel
       if not math.isfinite(a_lat):
@@ -493,32 +497,34 @@ class RobotFaceView(Widget):
     # 화면 스케일: 절대 픽셀값은 1080 높이 기준이므로 rect 높이에 비례해
     # 조정한다. BIG_UI(1080)에서는 1.0, mici(240)에서는 약 0.22.
     scale = max(SCALE_MIN, min(SCALE_MAX, rect.height / REFERENCE_HEIGHT))
-    # HUD 스케일: 작은 화면에서도 읽히게 0.5 아래로 줄이지 않는다.
+    # HUD 스케일: 작은 화면에서도 읽히게 0.6 아래로 줄이지 않는다.
     hud_scale = max(scale, HUD_SCALE_MIN)
+    # 움직임 스케일: 작은 화면에서도 쏠림·시선·떨림이 보이게 0.5 아래로 줄이지 않는다.
+    motion_scale = max(scale, MOTION_SCALE_MIN)
 
     # 배경: 순수 검은 화면 (테두리 없음 — 콤마 화면 자체가 프레임이다)
     rl.draw_rectangle_rec(rect, rl.BLACK)
 
-    lean_x = self._lean_offset(sig, scale)
+    lean_x = self._lean_offset(sig, motion_scale)
 
     # 눈 (인게이지 직후 0.8초는 핸들 플래시)
     if state == FaceState.ENGAGED and now - self._engage_time < ENGAGE_FLASH_SEC:
-      self._draw_wheel_flash(rect, now, lean_x, scale)
+      self._draw_wheel_flash(rect, now, lean_x, motion_scale)
     else:
-      self._draw_eyes(rect, state, now, lean_x, scale)
+      self._draw_eyes(rect, state, now, lean_x, motion_scale)
 
     # 급가속 속도선
     if state == FaceState.HARD_ACCEL:
-      self._draw_speed_lines(rect, now, lean_x, scale)
+      self._draw_speed_lines(rect, now, lean_x, motion_scale)
 
     # 반짝이
-    self._draw_sparkles(rect, state, now, lean_x, scale)
+    self._draw_sparkles(rect, state, now, lean_x, motion_scale)
 
     # 깜빡이 < >
     if state == FaceState.BLINKER_LEFT:
-      self._draw_chevron(rect, -1, now, lean_x, scale)
+      self._draw_chevron(rect, -1, now, lean_x, motion_scale)
     elif state == FaceState.BLINKER_RIGHT:
-      self._draw_chevron(rect, 1, now, lean_x, scale)
+      self._draw_chevron(rect, 1, now, lean_x, motion_scale)
 
     # 인게이지 HUD (핸들·현재 속도·목표 속도·차간거리)
     if state == FaceState.ENGAGED:
@@ -573,8 +579,8 @@ class RobotFaceView(Widget):
     if state == FaceState.DEPARTING:
       return 1.05, 1.05, 0.0, -30.0 * scale * abs(math.sin(2.0 * math.pi * now / 0.8)), 0.0
     if state == FaceState.HARD_BRAKE:
-      jx = 6.0 * scale * math.sin(2.0 * math.pi * now * 13.0)
-      jy = 4.0 * scale * math.sin(2.0 * math.pi * now * 17.0 + 1.0)
+      jx = 10.0 * scale * math.sin(2.0 * math.pi * now * 13.0)
+      jy = 7.0 * scale * math.sin(2.0 * math.pi * now * 17.0 + 1.0)
       return 1.35, 1.35, jx, jy, 0.0
     if state == FaceState.DM_ALERT:
       return 1.2, 1.2, 0.0, 0.0, 25.0 * scale * math.sin(2.0 * math.pi * now / 0.7)
@@ -596,8 +602,8 @@ class RobotFaceView(Widget):
       return 1.25, 0.85, 0.0, eye_h * 0.03, 0.0
     if state == FaceState.LEAD_CLOSE:
       # 가늘게 좁힌 눈 + 미세한 떨림 (긴장)
-      jx = 3.0 * scale * math.sin(2.0 * math.pi * now * 15.0)
-      jy = 2.0 * scale * math.sin(2.0 * math.pi * now * 19.0 + 1.0)
+      jx = 6.0 * scale * math.sin(2.0 * math.pi * now * 15.0)
+      jy = 4.0 * scale * math.sin(2.0 * math.pi * now * 19.0 + 1.0)
       return 1.1, 0.45, jx, jy, 0.0
     if state == FaceState.TRAFFIC_JAM:
       # 반쯤 감긴 축 처진 눈 (지루함)
@@ -621,12 +627,12 @@ class RobotFaceView(Widget):
     # 호흡: 급제동·운전자 주의·앞차 근접·수면·주차를 빼고 미세하게 커졌다 작아짐
     if state not in (FaceState.HARD_BRAKE, FaceState.DM_ALERT, FaceState.LEAD_CLOSE,
                      FaceState.SLEEP, FaceState.PARKED):
-      breathe = 1.0 + 0.02 * math.sin(2.0 * math.pi * now / BREATHE_PERIOD_SEC)
+      breathe = 1.0 + 0.03 * math.sin(2.0 * math.pi * now / BREATHE_PERIOD_SEC)
       scale_x *= breathe
       scale_y *= breathe
       # 시선 천천히 이동 (평소·인게이지에서만)
       if state in (FaceState.IDLE, FaceState.ENGAGED):
-        gaze_x += 6.0 * scale * math.sin(2.0 * math.pi * now / 7.0)
+        gaze_x += 10.0 * scale * math.sin(2.0 * math.pi * now / 7.0)
 
     # 깜빡임 (급제동·운전자 주의·앞차 근접은 눈을 크게 뜬 상태, 수면·주차는
     # 감은 상태라 깜빡임 없음. 정체는 4초 주기로 느리게 깜빡인다)
