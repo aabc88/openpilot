@@ -165,7 +165,7 @@ def read_robot_face_params(params) -> RobotFaceParamSnapshot:
       test = round(float(raw)) if raw is not None else 0
     except Exception:
       test = 0
-  return RobotFaceParamSnapshot(enabled=bool(enabled), test=min(max(test, 0), 14))
+  return RobotFaceParamSnapshot(enabled=bool(enabled), test=min(max(test, 0), 18))
 
 
 def write_robot_face_test(params, value: int) -> None:

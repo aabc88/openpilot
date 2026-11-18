@@ -16,10 +16,13 @@ UI만으로 동작한다. 표정은 눈 2개의 모양·색·움직임만으로 
 나온다. 깜빡이 때는 방향 쪽에 꺾쇠 화살표 한 개(90도)가 점멸한다.
 
 표정 우선순위 (위쪽이 이김):
-  운전자 주의 > 급제동 > 후진 > 차선변경 > 깜빡이 > 클램프 보정 > 출발 >
-  주의 해제 > 디스인게이지 > 신호 대기 > 인게이지 > 평소
+  운전자 주의 > 급제동 > 후진 > 앞차 근접 > 차선변경 > 깜빡이 > 급가속 >
+  클램프 보정 > 출발 > 주의 해제 > 디스인게이지 > 주차 > 정체 > 신호 대기 >
+  인게이지 > 평소
 출발/주의 해제/디스인게이지는 전이 후 3초간만 표시되는 일시 표정이다.
 충전 중 수면은 offroad 상태라 실시간으로는 뜨지 않고 테스트로만 볼 수 있다.
+앞차 근접은 레이더 앞차와의 충돌 예상 시간(TTC) 2초 미만일 때,
+정체는 10km/h 미만으로 앞차를 따라갈 때, 주차는 기어가 P일 때 뜬다.
 
 RobotFaceTest 파라미터가 0이 아니면 실시간 상태와 무관하게 해당 표정을
 표시한다 (표정 테스트). 토글이 꺼진 상태에서 테스트를 선택하면 10초간만
@@ -75,6 +78,10 @@ class FaceState(IntEnum):
   WAITING = 12       # 신호 대기
   REVERSE = 13       # 후진
   SLEEP = 14         # 충전 중 수면
+  HARD_ACCEL = 15    # 급가속
+  LEAD_CLOSE = 16    # 앞차 근접
+  TRAFFIC_JAM = 17   # 정체
+  PARKED = 18        # 주차
 
 
 FACE_NAMES = {
@@ -92,6 +99,10 @@ FACE_NAMES = {
   FaceState.WAITING: "신호 대기",
   FaceState.REVERSE: "후진",
   FaceState.SLEEP: "충전 중 수면",
+  FaceState.HARD_ACCEL: "급가속",
+  FaceState.LEAD_CLOSE: "앞차 근접",
+  FaceState.TRAFFIC_JAM: "정체",
+  FaceState.PARKED: "주차",
 }
 
 # 운전자 주의 표정을 띄우는 이벤트 (selfdrived가 발행하는 onroadEvents 이름)
@@ -102,6 +113,13 @@ DM_EVENT_NAMES = frozenset({
 })
 
 HARD_BRAKE_AEGO = -3.0        # m/s², 이보다 강한 감속이면 급제동 표정
+HARD_ACCEL_AEGO = 2.0         # m/s², 이보다 강한 가속이면 급가속 표정
+LEAD_CLOSE_TTC_SEC = 2.0      # 앞차와 충돌 예상 시간(TTC)이 이 미만이면 앞차 근접 표정
+LEAD_CLOSE_VREL_MIN = 1.0     # m/s, 이보다 빠르게 가까워져야 앞차 근접으로 인정 (정체 크리프 제외)
+LEAD_CLOSE_DREL_MAX = 50.0    # m, 앞차가 이보다 멀면 앞차 근접 계산 안 함
+TRAFFIC_JAM_V_MAX = 2.78      # m/s (10km/h), 이 미만 속도로 앞차 따라가면 정체 표정
+TRAFFIC_JAM_DREL_MAX = 30.0   # m, 앞차가 이 안에 있어야 정체로 인정
+TRAFFIC_JAM_BLINK_PERIOD = 4.0  # 정체 상태 깜빡임 주기 (평소 2.2초보다 느리게)
 TRANSIENT_SEC = 3.0           # 출발/주의 해제/디스인게이지 표시 시간
 TEST_PREVIEW_SEC = 10.0       # 토글 OFF 상태에서 표정 테스트 표시 시간
 BLINK_PERIOD_SEC = 2.2        # 눈 깜빡임 주기
@@ -142,6 +160,10 @@ EYE_PALETTES = {
   FaceState.WAITING: (rl.Color(255, 248, 220, 255), rl.Color(245, 200, 80, 255), rl.Color(240, 190, 60, 36)),
   FaceState.REVERSE: (rl.Color(255, 248, 220, 255), rl.Color(245, 200, 80, 255), rl.Color(240, 190, 60, 36)),
   FaceState.SLEEP: (rl.Color(180, 200, 255, 255), rl.Color(90, 110, 220, 255), rl.Color(70, 90, 200, 30)),
+  FaceState.HARD_ACCEL: (rl.Color(255, 240, 210, 255), rl.Color(255, 150, 60, 255), rl.Color(255, 140, 40, 36)),
+  FaceState.LEAD_CLOSE: (rl.Color(255, 220, 200, 255), rl.Color(255, 110, 70, 255), rl.Color(255, 80, 50, 40)),
+  FaceState.TRAFFIC_JAM: (rl.Color(210, 220, 235, 255), rl.Color(140, 160, 190, 255), rl.Color(120, 140, 170, 30)),
+  FaceState.PARKED: (rl.Color(235, 225, 255, 255), rl.Color(180, 160, 230, 255), rl.Color(160, 140, 220, 30)),
 }
 
 SHADOW_BAND_COLOR = rl.Color(120, 80, 50, 45)   # 윗꺼풀 그림자 띠
@@ -149,6 +171,7 @@ HIGHLIGHT_COLOR = rl.Color(255, 255, 255, 235)  # 큰 하이라이트
 HIGHLIGHT_SMALL_COLOR = rl.Color(255, 255, 255, 130)  # 작은 하이라이트
 WHEEL_FLASH_COLOR = rl.Color(110, 230, 170, 255)  # 인게이지 핸들 플래시 (밝은 민트)
 CHEVRON_COLOR = rl.ORANGE                        # 깜빡이 꺾쇠(< >) 색
+SPEED_LINE_COLOR = rl.Color(255, 150, 60, 180)   # 급가속 속도선 (주황, 반투명)
 HUD_GREEN = rl.Color(0x16, 0x7F, 0x40, 255)      # HUD 핸들·차간 막대
 HUD_TEXT = rl.Color(255, 255, 255, 230)          # HUD 글자
 HUD_DIM = rl.Color(255, 255, 255, 160)           # HUD 보조 글자
@@ -162,6 +185,9 @@ class _Signals:
   left_blinker: bool = False
   right_blinker: bool = False
   reverse: bool = False
+  parked: bool = False
+  lead_close: bool = False   # 앞차 TTC 2초 미만 (레이더)
+  traffic_jam: bool = False  # 10km/h 미만 + 앞차 있음 (레이더)
   engaged: bool = False
   dm_alert: bool = False
   clamp_active: bool = False
@@ -255,7 +281,9 @@ class RobotFaceView(Widget):
       sig.left_blinker = bool(cs.leftBlinker)
       sig.right_blinker = bool(cs.rightBlinker)
       # hud_renderer와 동일한 방식: cereal enum을 문자열로 바꿔 비교
-      sig.reverse = "REVERSE" in str(cs.gearShifter).split(".")[-1].upper()
+      gear = str(cs.gearShifter).split(".")[-1].upper()
+      sig.reverse = "REVERSE" in gear
+      sig.parked = "PARK" in gear
       try:
         sig.a_ego = float(cs.aEgo)
       except Exception:
@@ -324,6 +352,23 @@ class RobotFaceView(Widget):
         sig.lane_change_dir = 1
     except Exception:
       pass
+    # 앞차 (레이더 leadOne): dRel 거리, vRel 상대속도(음수 = 가까워짐),
+    # status 앞차 존재 여부. TTC = 거리 / 접근속도.
+    try:
+      lead = sm["radarState"].leadOne
+      d_rel = float(lead.dRel)
+      v_rel = float(lead.vRel)
+      present = bool(lead.status) and math.isfinite(d_rel) and 0.0 < d_rel < LEAD_CLOSE_DREL_MAX
+      if present and v_rel < -LEAD_CLOSE_VREL_MIN:
+        ttc = d_rel / -v_rel
+        if math.isfinite(ttc) and ttc < LEAD_CLOSE_TTC_SEC:
+          sig.lead_close = True
+      # 정체: 10km/h 미만으로 앞차(30m 안)를 따라 천천히 이동 중.
+      # 정지 상태는 신호 대기 표정이 맡으므로 vEgo > 0.1 조건을 둔다.
+      if present and d_rel < TRAFFIC_JAM_DREL_MAX and 0.1 < sig.v_ego < TRAFFIC_JAM_V_MAX:
+        sig.traffic_jam = True
+    except Exception:
+      pass
     return sig
 
   def _update_transitions(self, sig: _Signals, now: float) -> None:
@@ -366,12 +411,16 @@ class RobotFaceView(Widget):
       return FaceState.HARD_BRAKE
     if sig.reverse:
       return FaceState.REVERSE
+    if sig.lead_close:
+      return FaceState.LEAD_CLOSE
     if sig.lane_changing:
       return FaceState.LANE_CHANGE
     if sig.left_blinker:
       return FaceState.BLINKER_LEFT
     if sig.right_blinker:
       return FaceState.BLINKER_RIGHT
+    if sig.a_ego > HARD_ACCEL_AEGO:
+      return FaceState.HARD_ACCEL
     if sig.clamp_active:
       return FaceState.CLAMP
     if now - self._depart_time < TRANSIENT_SEC:
@@ -380,6 +429,10 @@ class RobotFaceView(Widget):
       return FaceState.DM_CLEAR
     if now - self._disengage_time < TRANSIENT_SEC:
       return FaceState.DISENGAGED
+    if sig.parked:
+      return FaceState.PARKED
+    if sig.traffic_jam:
+      return FaceState.TRAFFIC_JAM
     if sig.standstill or sig.v_ego < 0.1:
       return FaceState.WAITING
     if sig.engaged:
@@ -443,6 +496,10 @@ class RobotFaceView(Widget):
       self._draw_wheel_flash(rect, now, lean_x, scale)
     else:
       self._draw_eyes(rect, state, now, lean_x, scale)
+
+    # 급가속 속도선
+    if state == FaceState.HARD_ACCEL:
+      self._draw_speed_lines(rect, now, lean_x, scale)
 
     # 반짝이
     self._draw_sparkles(rect, state, now, lean_x, scale)
@@ -518,6 +575,21 @@ class RobotFaceView(Widget):
     if state == FaceState.SLEEP:
       breathe_y = 6.0 * scale * math.sin(2.0 * math.pi * now / 2.5)
       return 1.0, 0.06, 0.0, breathe_y, 0.0
+    if state == FaceState.HARD_ACCEL:
+      # 가로로 길게 늘어난 눈 + 살짝 아래로 처짐 (가속으로 뒤로 밀리는 느낌)
+      return 1.25, 0.85, 0.0, eye_h * 0.03, 0.0
+    if state == FaceState.LEAD_CLOSE:
+      # 가늘게 좁힌 눈 + 미세한 떨림 (긴장)
+      jx = 3.0 * scale * math.sin(2.0 * math.pi * now * 15.0)
+      jy = 2.0 * scale * math.sin(2.0 * math.pi * now * 19.0 + 1.0)
+      return 1.1, 0.45, jx, jy, 0.0
+    if state == FaceState.TRAFFIC_JAM:
+      # 반쯤 감긴 축 처진 눈 (지루함)
+      return 1.0, 0.40, 0.0, eye_h * 0.05, 0.0
+    if state == FaceState.PARKED:
+      # 편하게 감긴 눈 + 느린 호흡 (휴식)
+      breathe_y = 6.0 * scale * math.sin(2.0 * math.pi * now / 3.0)
+      return 1.0, 0.10, 0.0, breathe_y, 0.0
     return 1.0, 1.0, 0.0, 0.0, 0.0  # IDLE
 
   def _eye_geometry(self, rect: rl.Rectangle, state: FaceState, now: float, scale: float = 1.0):
@@ -530,8 +602,9 @@ class RobotFaceView(Widget):
 
     scale_x, scale_y, off_x, off_y, gaze_x = self._eye_transform(state, now, eye_w, eye_h, scale)
 
-    # 호흡: 급제동·운전자 주의·수면을 빼고 미세하게 커졌다 작아짐
-    if state not in (FaceState.HARD_BRAKE, FaceState.DM_ALERT, FaceState.SLEEP):
+    # 호흡: 급제동·운전자 주의·앞차 근접·수면·주차를 빼고 미세하게 커졌다 작아짐
+    if state not in (FaceState.HARD_BRAKE, FaceState.DM_ALERT, FaceState.LEAD_CLOSE,
+                     FaceState.SLEEP, FaceState.PARKED):
       breathe = 1.0 + 0.02 * math.sin(2.0 * math.pi * now / BREATHE_PERIOD_SEC)
       scale_x *= breathe
       scale_y *= breathe
@@ -539,11 +612,14 @@ class RobotFaceView(Widget):
       if state in (FaceState.IDLE, FaceState.ENGAGED):
         gaze_x += 6.0 * scale * math.sin(2.0 * math.pi * now / 7.0)
 
-    # 깜빡임 (급제동·운전자 주의·수면은 눈을 크게 뜨거나 감은 상태라 깜빡임 없음)
-    if state not in (FaceState.HARD_BRAKE, FaceState.DM_ALERT, FaceState.SLEEP):
-      t = now % BLINK_PERIOD_SEC
-      if t > BLINK_PERIOD_SEC - BLINK_DURATION_SEC:
-        p = (t - (BLINK_PERIOD_SEC - BLINK_DURATION_SEC)) / BLINK_DURATION_SEC
+    # 깜빡임 (급제동·운전자 주의·앞차 근접은 눈을 크게 뜬 상태, 수면·주차는
+    # 감은 상태라 깜빡임 없음. 정체는 4초 주기로 느리게 깜빡인다)
+    if state not in (FaceState.HARD_BRAKE, FaceState.DM_ALERT, FaceState.LEAD_CLOSE,
+                     FaceState.SLEEP, FaceState.PARKED):
+      period = TRAFFIC_JAM_BLINK_PERIOD if state == FaceState.TRAFFIC_JAM else BLINK_PERIOD_SEC
+      t = now % period
+      if t > period - BLINK_DURATION_SEC:
+        p = (t - (period - BLINK_DURATION_SEC)) / BLINK_DURATION_SEC
         scale_y *= 1.0 - 0.96 * math.sin(math.pi * p)
 
     return eye_w, eye_h, half_span, scale_x, scale_y, off_x, off_y, gaze_x
@@ -630,9 +706,30 @@ class RobotFaceView(Widget):
     rl.draw_triangle(rl.Vector2(cx + size * 0.7, cy), rl.Vector2(cx, cy - w), rl.Vector2(cx, cy + w), color)
     rl.draw_circle(int(cx), int(cy), max(w * 0.8, 1.0), color)
 
+  def _draw_speed_lines(self, rect: rl.Rectangle, now: float, lean_x: float, scale: float = 1.0) -> None:
+    """급가속 속도선: 각 눈 바깥쪽에 가로 선 2개씩. 속도감을 준다."""
+    cx = rect.x + rect.width / 2.0 + lean_x
+    cy = rect.y + rect.height / 2.0
+    eye_h = rect.height * 0.34
+    eye_w = eye_h * 0.8
+    gap = eye_w * 1.0
+    half_span = eye_w / 2.0 + gap / 2.0
+    line_len = eye_w * 0.55
+    thickness = 6.0 * scale
+    for sign in (-1, 1):
+      eye_outer = cx + sign * (half_span + eye_w * 0.5)
+      x_inner = eye_outer + sign * eye_w * 0.25
+      x_outer = x_inner + sign * line_len
+      for dy in (-eye_h * 0.15, eye_h * 0.15):
+        rl.draw_line_ex(rl.Vector2(x_inner, cy + dy), rl.Vector2(x_outer, cy + dy),
+                        thickness, SPEED_LINE_COLOR)
+
   def _draw_sparkles(self, rect: rl.Rectangle, state: FaceState, now: float, lean_x: float, scale: float = 1.0) -> None:
-    """눈가에 드물게 떴다 사라지는 반짝이. 경고·수면 상태에서는 표시하지 않는다."""
-    if state in (FaceState.HARD_BRAKE, FaceState.DM_ALERT, FaceState.SLEEP):
+    """눈가에 드물게 떴다 사라지는 반짝이. 경고·수면·주차 상태에서는 표시하지
+    않고, 급가속(속도선이 대신함)·정체(지루한 표정)에서도 표시하지 않는다."""
+    if state in (FaceState.HARD_BRAKE, FaceState.DM_ALERT, FaceState.SLEEP,
+                 FaceState.HARD_ACCEL, FaceState.LEAD_CLOSE, FaceState.TRAFFIC_JAM,
+                 FaceState.PARKED):
       return
     cx = rect.x + rect.width / 2.0 + lean_x
     cy = rect.y + rect.height / 2.0
