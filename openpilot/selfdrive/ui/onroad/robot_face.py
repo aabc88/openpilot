@@ -182,7 +182,10 @@ SHADOW_BAND_COLOR = rl.Color(120, 80, 50, 45)   # 윗꺼풀 그림자 띠
 HIGHLIGHT_COLOR = rl.Color(255, 255, 255, 235)  # 큰 하이라이트
 HIGHLIGHT_SMALL_COLOR = rl.Color(255, 255, 255, 130)  # 작은 하이라이트
 WHEEL_FLASH_COLOR = rl.Color(110, 230, 170, 255)  # 인게이지 핸들 플래시 (밝은 민트)
-CHEVRON_COLOR = rl.ORANGE                        # 깜빡이 꺾쇠(< >) 색
+CHEVRON_RGB = (255, 165, 0)                     # 깜빡이 꺾쇠(< >) 색 (주황).
+# rl.ORANGE 같은 이름 있는 색 상수는 기기의 pyray에서 .r/.g/.b 속성이 없어
+# AttributeError로 UI가 죽는다 (2026-11-18 깜빡이 켜면 콤마 로고로 바뀜).
+# 잔상용 알파 색을 만들 때 이 튜플 값을 직접 쓸 것.
 SPEED_LINE_COLOR = rl.Color(255, 150, 60, 180)   # 급가속 속도선 (주황, 반투명)
 HUD_GREEN = rl.Color(0x16, 0x7F, 0x40, 255)      # HUD 핸들·차간 막대
 HUD_TEXT = rl.Color(255, 255, 255, 230)          # HUD 글자
@@ -523,11 +526,15 @@ class RobotFaceView(Widget):
     # 반짝이
     self._draw_sparkles(rect, state, now, lean_x, motion_scale)
 
-    # 깜빡이 < >
-    if state == FaceState.BLINKER_LEFT:
-      self._draw_chevron(rect, -1, now, lean_x, motion_scale)
-    elif state == FaceState.BLINKER_RIGHT:
-      self._draw_chevron(rect, 1, now, lean_x, motion_scale)
+    # 깜빡이 < > — 그리기 실패가 UI 전체를 죽이지 않게 가드한다
+    # (2026-11-18: _draw_chevron 예외로 UI가 재시작돼 콤마 로고만 보임)
+    try:
+      if state == FaceState.BLINKER_LEFT:
+        self._draw_chevron(rect, -1, now, lean_x, motion_scale)
+      elif state == FaceState.BLINKER_RIGHT:
+        self._draw_chevron(rect, 1, now, lean_x, motion_scale)
+    except Exception:
+      pass
 
     # 인게이지 HUD (핸들·현재 속도·목표 속도·차간거리)
     if state == FaceState.ENGAGED:
@@ -815,7 +822,7 @@ class RobotFaceView(Widget):
         continue
       base_x = start_x + (end_x - start_x) * pp
       tip_x = base_x + direction * size * 0.5  # 90도: 팁 오프셋 = 세로 절반
-      color = rl.Color(CHEVRON_COLOR.r, CHEVRON_COLOR.g, CHEVRON_COLOR.b, alpha)
+      color = rl.Color(CHEVRON_RGB[0], CHEVRON_RGB[1], CHEVRON_RGB[2], alpha)
       rl.draw_line_ex(rl.Vector2(base_x, cy - size / 2.0), rl.Vector2(tip_x, cy), thickness, color)
       rl.draw_line_ex(rl.Vector2(tip_x, cy), rl.Vector2(base_x, cy + size / 2.0), thickness, color)
 
