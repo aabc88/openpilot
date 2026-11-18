@@ -132,10 +132,11 @@ LEAN_MAX_PX = 80.0            # 커브 쏠림 최대 이동량 (px)
 LEAN_PER_LAT_ACCEL = 28.0     # 횡가속도 1 m/s²당 쏠림 (px)
 LAT_ACCEL_SHOW_MIN = 0.5      # 횡가속도 표시 최소값 (m/s²)
 HUD_GAP_REFRESH_SEC = 0.5     # 차간거리 파라미터 읽기 주기
-HUD_SCALE_MIN = 0.5           # HUD 최소 스케일. 화면 높이에 비례한 scale을
+HUD_SCALE_MIN = 0.6           # HUD 최소 스케일. 화면 높이에 비례한 scale을
 # 그대로 쓰면 mici(0.22배)에서 속도 글자가 20px·핸들 반지름 8px로 너무
-# 작아 운전 중 읽히지 않는다. HUD 요소는 0.5배 아래로 줄이지 않는다
-# (BIG_UI에서는 scale 1.0이라 그대로).
+# 작아 운전 중 읽히지 않는다. HUD 요소는 0.6배 아래로 줄이지 않는다
+# (mici: 속도 54px·핸들 반지름 21px·차간 막대 10.8x15.6px,
+#  BIG_UI에서는 scale 1.0이라 그대로).
 
 # 절대 픽셀값의 기준 화면 높이 (BIG_UI 1080). _render에서
 # scale = rect.height / REFERENCE_HEIGHT를 계산해 모든 절대값에 곱한다.
@@ -806,7 +807,8 @@ class RobotFaceView(Widget):
     cur = max(0.0, sig.v_ego_display * speed_conv)
     draw_text_ui_style(f"{int(round(cur))}", cx - 60.0 * scale, hud_y + 10.0 * scale, 90.0 * scale, HUD_TEXT,
                        align="center_bottom")
-    draw_text_ui_style(speed_unit, cx - 60.0 * scale, hud_y + 55.0 * scale, 30.0 * scale, HUD_DIM,
+    # 단위는 속도 숫자 바로 아래. 오프셋이 크면 mici 하단(240px)을 넘어 잘린다.
+    draw_text_ui_style(speed_unit, cx - 60.0 * scale, hud_y + 40.0 * scale, 30.0 * scale, HUD_DIM,
                        align="center_bottom")
     # 목표 속도 (현재 속도 오른쪽, 작게). SET 라벨은 목표 숫자와 겹치지 않게
     # 위로 띄운다 (숫자가 커져서 기존 -25 오프셋이면 겹친다).
