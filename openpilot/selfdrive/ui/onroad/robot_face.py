@@ -13,7 +13,8 @@ UI만으로 동작한다. 표정은 눈 2개의 모양·색·움직임만으로 
 뜨는 네 갈래 반짝이. 인게이지하면 잠깐 핸들 모양이 떴다가 민트색 집중 눈이
 된다. 커브에서는 도는 방향의 반대로 얼굴이 쏠리고 현재 횡가속도를 보여준다.
 인게이지 상태에서는 하단에 최소 HUD(핸들·현재 속도·목표 속도·차간거리)가
-나온다. 깜빡이 때는 방향 쪽에 꺾쇠 화살표 한 개(90도)가 점멸한다.
+나온다. 깜빡이 때는 화살표 3개(90도 꺾쇠)가 눈 옆에서 시작해 신호 방향으로
+화면 끝까지 흘러간다.
 
 표정 우선순위 (위쪽이 이김):
   운전자 주의 > 급제동 > 후진 > 앞차 근접 > 차선변경 > 깜빡이 > 급가속 >
@@ -129,7 +130,7 @@ BREATHE_PERIOD_SEC = 2.5      # 호흡(미세한 커짐/작아짐) 주기
 SPARKLE_COUNT = 3             # 반짝이 개수
 SPARKLE_PERIOD_SEC = 3.0      # 반짝이 깜빡임 사이클
 CHEVRON_SWEEP_SEC = 1.2       # 깜빡이 화살표 이동 주기 (눈 옆 → 화면 끝)
-CHEVRON_TRAIL = ((0.0, 255), (-0.15, 110), (-0.30, 45))  # 잔상: (진행도 오프셋, 알파)
+CHEVRON_COUNT = 3             # 동시에 이동하는 화살표 개수 (경로에 균등 배치)
 CHEVRON_FADE = 0.1            # 이동 시작/끝에서 페이드 인/아웃하는 진행도 구간
 LEAN_MAX_PX = 120.0           # 커브 쏠림 최대 이동량 (px)
 LEAN_PER_LAT_ACCEL = 40.0     # 횡가속도 1 m/s²당 쏠림 (px)
@@ -792,9 +793,9 @@ class RobotFaceView(Widget):
       self._draw_sparkle(ax, ay, size, rl.Color(255, 255, 255, int(220 * tw)))
 
   def _draw_chevron(self, rect: rl.Rectangle, direction: int, now: float, lean_x: float, scale: float = 1.0) -> None:
-    """깜빡이 < >: 눈 옆에서 시작해 신호 방향으로 화면 끝까지 이동한다.
-    잔상(알파가 옅은 뒤쪽 화살표 2개)을 남기며 1.2초 주기로 반복하고,
-    시작/끝 구간에서 페이드 인/아웃해 끊기지 않게 이어진다.
+    """깜빡이 < >: 3개의 화살표가 눈 옆에서 시작해 신호 방향으로 화면 끝까지
+    이동한다. 화살표들은 이동 경로에 균등하게 배치돼 끊기지 않고 흘러가며
+    (끝에 닿으면 다시 시작점으로), 시작/끝 구간에서 페이드 인/아웃한다.
     꺾쇠 각도는 90도 — 팁 오프셋(가로)이 세로 절반과 같아 두 선이 직각으로
     만난다. 점멸 대신 이동 자체가 깜빡이 신호다."""
     cx = rect.x + rect.width / 2.0 + lean_x
@@ -811,13 +812,12 @@ class RobotFaceView(Widget):
     end_x = rect.x + margin if direction < 0 else rect.x + rect.width - margin
     thickness = 10.0 * scale
     p = (now % CHEVRON_SWEEP_SEC) / CHEVRON_SWEEP_SEC
-    for dp, base_alpha in CHEVRON_TRAIL:
-      pp = p + dp
-      if pp < 0:
-        continue  # 아직 출발하지 않은 잔상은 그리지 않음
+    for i in range(CHEVRON_COUNT):
+      # 각 화살표는 주기의 1/3씩 어긋나게 배치돼 경로를 균등하게 채운다
+      pp = (p + i / CHEVRON_COUNT) % 1.0
       # 시작/끝 페이드: 이동 시작과 끝에서 알파를 서서히 올리고 내림
       fade = min(pp / CHEVRON_FADE, (1.0 - pp) / CHEVRON_FADE, 1.0)
-      alpha = int(base_alpha * fade)
+      alpha = int(255 * fade)
       if alpha <= 0:
         continue
       base_x = start_x + (end_x - start_x) * pp
