@@ -134,8 +134,6 @@ CHEVRON_COUNT = 3             # 동시에 이동하는 화살표 개수 (경로�
 CHEVRON_FADE = 0.1            # 이동 시작/끝에서 페이드 인/아웃하는 진행도 구간
 LEAN_MAX_PX = 180.0           # 커브 쏠림 최대 이동량 (px)
 LEAN_PER_LAT_ACCEL = 70.0     # 횡가속도 1 m/s²당 쏠림 (px)
-LEAN_STRETCH_MAX = 0.25       # 커브 최대 쏠림에서 눈이 가로로 늘어나는 비율 (당김)
-LEAN_ANGLE_MAX = 20.0         # 커브 최대 쏠림에서 눈이 기우는 각도 (도, 시계 방향 +)
 MOTION_SCALE_MIN = 0.5        # 움직임 최소 스케일. 화면 높이 비례 scale을
 # 그대로 쓰면 mici(0.22배)에서 쏠림·시선·떨림이 1~6px이 돼 눈에 안 보인다.
 # 움직임(쏠림·오프셋·시선·반짝이·꺾쇠·속도선)은 0.5배 아래로 줄이지 않는다
@@ -517,14 +515,10 @@ class RobotFaceView(Widget):
     lean_x = self._lean_offset(sig, motion_scale)
 
     # 눈 (인게이지 직후 0.8초는 핸들 플래시)
-    # 그리기 실패가 UI 전체를 죽이지 않게 가드한다 (깜빡이 크래시와 동일)
-    try:
-      if state == FaceState.ENGAGED and now - self._engage_time < ENGAGE_FLASH_SEC:
-        self._draw_wheel_flash(rect, now, lean_x, motion_scale)
-      else:
-        self._draw_eyes(rect, state, now, lean_x, motion_scale)
-    except Exception:
-      pass
+    if state == FaceState.ENGAGED and now - self._engage_time < ENGAGE_FLASH_SEC:
+      self._draw_wheel_flash(rect, now, lean_x, motion_scale)
+    else:
+      self._draw_eyes(rect, state, now, lean_x, motion_scale)
 
     # 급가속 속도선
     if state == FaceState.HARD_ACCEL:
@@ -663,38 +657,6 @@ class RobotFaceView(Widget):
 
     return eye_w, eye_h, half_span, scale_x, scale_y, off_x, off_y, gaze_x
 
-  @staticmethod
-  def _rotate_point(dx: float, dy: float, angle_deg: float):
-    """점을 눈 중심 기준으로 시계 방향으로 회전 (draw_rectangle_pro와 동일 방향)."""
-    rad = math.radians(angle_deg)
-    cos_a, sin_a = math.cos(rad), math.sin(rad)
-    return (dx * cos_a - dy * sin_a, dx * sin_a + dy * cos_a)
-
-  @staticmethod
-  def _draw_capsule(cx: float, cy: float, w: float, h: float, angle_deg: float, color: rl.Color) -> None:
-    """회전 가능한 캡슐(알약): 중앙 직사각형 + 양끝 원.
-    draw_rectangle_rounded는 회전을 못 해서, 회전 가능한 draw_rectangle_pro로
-    중앙을 그리고 양끝 원을 회전된 위치에 배치한다. angle_deg는 시계 방향(도).
-    h >= w면 세로 캡슐, w > h면 가로 캡슐."""
-    if h >= w:
-      rect_h = h - w
-      r = w / 2.0
-      if rect_h > 0:
-        rect = rl.Rectangle(cx - w / 2.0, cy - rect_h / 2.0, w, rect_h)
-        rl.draw_rectangle_pro(rect, rl.Vector2(w / 2.0, rect_h / 2.0), angle_deg, color)
-      for dy in (-rect_h / 2.0, rect_h / 2.0):
-        ox, oy = RobotFaceView._rotate_point(0.0, dy, angle_deg)
-        rl.draw_circle(int(cx + ox), int(cy + oy), r, color)
-    else:
-      rect_w = w - h
-      r = h / 2.0
-      if rect_w > 0:
-        rect = rl.Rectangle(cx - rect_w / 2.0, cy - h / 2.0, rect_w, h)
-        rl.draw_rectangle_pro(rect, rl.Vector2(rect_w / 2.0, h / 2.0), angle_deg, color)
-      for dx in (-rect_w / 2.0, rect_w / 2.0):
-        ox, oy = RobotFaceView._rotate_point(dx, 0.0, angle_deg)
-        rl.draw_circle(int(cx + ox), int(cy + oy), r, color)
-
   def _draw_eyes(self, rect: rl.Rectangle, state: FaceState, now: float, lean_x: float, scale: float = 1.0) -> None:
     cx = rect.x + rect.width / 2.0 + lean_x
     cy = rect.y + rect.height / 2.0
@@ -707,37 +669,35 @@ class RobotFaceView(Widget):
                          (center_color.g + edge_color.g) // 2,
                          (center_color.b + edge_color.b) // 2, 255)
 
-    # 커브 당김: 쏠림이 클수록 눈이 옆으로 늘어나고(당김) 각도가 기운다.
-    # 우회전(왼쪽으로 쏠림)이면 음수 각도 — 눈 위쪽이 왼쪽으로 기운다.
-    lean_norm = min(abs(lean_x) / (LEAN_MAX_PX * scale), 1.0) if scale > 0 else 0.0
-    stretch = lean_norm * LEAN_STRETCH_MAX
-    angle = (lean_x / (LEAN_MAX_PX * scale) * LEAN_ANGLE_MAX) if scale > 0 else 0.0
-    angle = max(-LEAN_ANGLE_MAX, min(LEAN_ANGLE_MAX, angle))
-    w = eye_w * scale_x * (1.0 + stretch)
-    h = max(eye_h * scale_y * (1.0 - stretch * 0.5), 4.0 * scale)  # 완전히 사라지지 않게 최소 높이 유지
+    w = eye_w * scale_x
+    h = max(eye_h * scale_y, 4.0 * scale)  # 완전히 사라지지 않게 최소 높이 유지
     base_y = cy - h / 2.0 + off_y
 
     for sign in (-1, 1):
       ex = cx + sign * half_span - w / 2.0 + off_x + gaze_x
-      eye_cx = ex + w / 2.0
-      eye_cy = base_y + h / 2.0
       # 은은한 빛 번짐 (글로우)
-      self._draw_capsule(eye_cx, eye_cy, w * 1.24, h * 1.16, angle, glow_color)
+      glow = rl.Rectangle(ex - w * 0.12, base_y - h * 0.08, w * 1.24, h * 1.16)
+      rl.draw_rectangle_rounded(glow, 0.6, 16, glow_color)
       # 그라데이션 3겹: 가장자리 → 중간 → 중심 (밝은 중심이 은은하게 번짐)
-      self._draw_capsule(eye_cx, eye_cy, w, h, angle, edge_color)
-      self._draw_capsule(eye_cx, eye_cy, w * 0.82, h * 0.82, angle, mid_color)
-      self._draw_capsule(eye_cx, eye_cy, w * 0.64, h * 0.64, angle, center_color)
+      rl.draw_rectangle_rounded(rl.Rectangle(ex, base_y, w, h), 0.55, 16, edge_color)
+      mid_w, mid_h = w * 0.82, h * 0.82
+      rl.draw_rectangle_rounded(
+        rl.Rectangle(ex + (w - mid_w) / 2.0, base_y + (h - mid_h) / 2.0, mid_w, mid_h),
+        0.55, 16, mid_color)
+      in_w, in_h = w * 0.64, h * 0.64
+      rl.draw_rectangle_rounded(
+        rl.Rectangle(ex + (w - in_w) / 2.0, base_y + (h - in_h) / 2.0, in_w, in_h),
+        0.55, 16, center_color)
       if h < 20.0 * scale:
         continue  # 눈이 거의 감겼으면 그림자·하이라이트 생략
-      # 윗꺼풀 그림자 띠 (깊이감) — 눈 위쪽, 회전 적용
+      # 윗꺼풀 그림자 띠 (깊이감)
       band_w, band_h = w * 0.9, h * 0.28
-      band_dx, band_dy = self._rotate_point(0.0, -h * 0.33, angle)
-      self._draw_capsule(eye_cx + band_dx, eye_cy + band_dy, band_w, band_h, angle, SHADOW_BAND_COLOR)
-      # 하이라이트: 큰 원 왼쪽 위 + 작은 점 오른쪽 아래 (유광 반짝임) — 회전 적용
-      for hx, hy, hr, hcolor in ((-0.20, -0.22, 0.16, HIGHLIGHT_COLOR),
-                                 (0.12, -0.02, 0.08, HIGHLIGHT_SMALL_COLOR)):
-        rx, ry = self._rotate_point(hx * w, hy * h, angle)
-        rl.draw_circle(int(eye_cx + rx), int(eye_cy + ry), w * hr, hcolor)
+      rl.draw_rectangle_rounded(
+        rl.Rectangle(ex + (w - band_w) / 2.0, base_y + h * 0.03, band_w, band_h),
+        0.5, 12, SHADOW_BAND_COLOR)
+      # 하이라이트: 큰 원 왼쪽 위 + 작은 점 오른쪽 아래 (유광 반짝임)
+      rl.draw_circle(int(ex + w * 0.30), int(base_y + h * 0.28), w * 0.16, HIGHLIGHT_COLOR)
+      rl.draw_circle(int(ex + w * 0.62), int(base_y + h * 0.48), w * 0.08, HIGHLIGHT_SMALL_COLOR)
 
   def _draw_wheel(self, cx: float, cy: float, radius: float, color: rl.Color) -> None:
     """핸들 아이콘: 두꺼운 림 + 스포크 3개 + 허브.
