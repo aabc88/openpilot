@@ -819,9 +819,12 @@ class RobotFaceView(Widget):
       draw_text_ui_style(f"{int(round(target))}", cx + 130.0 * scale, hud_y + 10.0 * scale, 55.0 * scale, HUD_TEXT,
                          align="center_bottom")
 
-    # 차간거리 막대 (오른쪽): 4칸 중 채워진 칸 수 = 단계
-    bar_x = rect.x + rect.width * 0.85
-    bar_w, bar_h, bar_gap = 18.0 * scale, 26.0 * scale, 8.0 * scale
+    # 차간거리 막대 (오른쪽): 4칸 중 채워진 칸 수 = 단계.
+    # 막대가 작아 안 보인다는 피드백으로 18x26에서 26x40으로 키움
+    # (mici 0.6배: 15.6x24px). 시작 위치도 0.85에서 0.84로 당겨
+    # 오른쪽 여백을 확보한다.
+    bar_x = rect.x + rect.width * 0.84
+    bar_w, bar_h, bar_gap = 26.0 * scale, 40.0 * scale, 8.0 * scale
     for i in range(4):
       x = bar_x + i * (bar_w + bar_gap)
       color = HUD_GREEN if i < self._gap_level else rl.Color(255, 255, 255, 60)
