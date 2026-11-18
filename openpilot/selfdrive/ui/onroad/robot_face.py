@@ -134,6 +134,8 @@ CHEVRON_COUNT = 3             # 동시에 이동하는 화살표 개수 (경로�
 CHEVRON_FADE = 0.1            # 이동 시작/끝에서 페이드 인/아웃하는 진행도 구간
 LEAN_MAX_PX = 180.0           # 커브 쏠림 최대 이동량 (px)
 LEAN_PER_LAT_ACCEL = 70.0     # 횡가속도 1 m/s²당 쏠림 (px)
+LEAN_STRETCH_MAX = 0.25       # 커브 최대 쏠림에서 눈이 가로로 늘어나는 비율 (당김)
+LEAN_TILT_FACTOR = 0.25       # 커브 쏠림에 대한 눈 높이 어긋남 비율 (삐뚤어짐)
 MOTION_SCALE_MIN = 0.5        # 움직임 최소 스케일. 화면 높이 비례 scale을
 # 그대로 쓰면 mici(0.22배)에서 쏠림·시선·떨림이 1~6px이 돼 눈에 안 보인다.
 # 움직임(쏠림·오프셋·시선·반짝이·꺾쇠·속도선)은 0.5배 아래로 줄이지 않는다
@@ -669,35 +671,40 @@ class RobotFaceView(Widget):
                          (center_color.g + edge_color.g) // 2,
                          (center_color.b + edge_color.b) // 2, 255)
 
-    w = eye_w * scale_x
-    h = max(eye_h * scale_y, 4.0 * scale)  # 완전히 사라지지 않게 최소 높이 유지
+    # 커브 당김: 쏠림이 클수록 눈이 옆으로 늘어나고(당김) 좌우 높이가 어긋나
+    # 삐뚤어진다. 쏠리는 방향 쪽 눈이 아래로 내려가 머리가 기우는 느낌.
+    lean_norm = min(abs(lean_x) / (LEAN_MAX_PX * scale), 1.0) if scale > 0 else 0.0
+    stretch = lean_norm * LEAN_STRETCH_MAX
+    w = eye_w * scale_x * (1.0 + stretch)
+    h = max(eye_h * scale_y * (1.0 - stretch * 0.5), 4.0 * scale)  # 완전히 사라지지 않게 최소 높이 유지
     base_y = cy - h / 2.0 + off_y
 
     for sign in (-1, 1):
       ex = cx + sign * half_span - w / 2.0 + off_x + gaze_x
+      ey = base_y + sign * lean_x * LEAN_TILT_FACTOR  # 좌우 눈 높이 어긋남
       # 은은한 빛 번짐 (글로우)
-      glow = rl.Rectangle(ex - w * 0.12, base_y - h * 0.08, w * 1.24, h * 1.16)
+      glow = rl.Rectangle(ex - w * 0.12, ey - h * 0.08, w * 1.24, h * 1.16)
       rl.draw_rectangle_rounded(glow, 0.6, 16, glow_color)
       # 그라데이션 3겹: 가장자리 → 중간 → 중심 (밝은 중심이 은은하게 번짐)
-      rl.draw_rectangle_rounded(rl.Rectangle(ex, base_y, w, h), 0.55, 16, edge_color)
+      rl.draw_rectangle_rounded(rl.Rectangle(ex, ey, w, h), 0.55, 16, edge_color)
       mid_w, mid_h = w * 0.82, h * 0.82
       rl.draw_rectangle_rounded(
-        rl.Rectangle(ex + (w - mid_w) / 2.0, base_y + (h - mid_h) / 2.0, mid_w, mid_h),
+        rl.Rectangle(ex + (w - mid_w) / 2.0, ey + (h - mid_h) / 2.0, mid_w, mid_h),
         0.55, 16, mid_color)
       in_w, in_h = w * 0.64, h * 0.64
       rl.draw_rectangle_rounded(
-        rl.Rectangle(ex + (w - in_w) / 2.0, base_y + (h - in_h) / 2.0, in_w, in_h),
+        rl.Rectangle(ex + (w - in_w) / 2.0, ey + (h - in_h) / 2.0, in_w, in_h),
         0.55, 16, center_color)
       if h < 20.0 * scale:
         continue  # 눈이 거의 감겼으면 그림자·하이라이트 생략
       # 윗꺼풀 그림자 띠 (깊이감)
       band_w, band_h = w * 0.9, h * 0.28
       rl.draw_rectangle_rounded(
-        rl.Rectangle(ex + (w - band_w) / 2.0, base_y + h * 0.03, band_w, band_h),
+        rl.Rectangle(ex + (w - band_w) / 2.0, ey + h * 0.03, band_w, band_h),
         0.5, 12, SHADOW_BAND_COLOR)
       # 하이라이트: 큰 원 왼쪽 위 + 작은 점 오른쪽 아래 (유광 반짝임)
-      rl.draw_circle(int(ex + w * 0.30), int(base_y + h * 0.28), w * 0.16, HIGHLIGHT_COLOR)
-      rl.draw_circle(int(ex + w * 0.62), int(base_y + h * 0.48), w * 0.08, HIGHLIGHT_SMALL_COLOR)
+      rl.draw_circle(int(ex + w * 0.30), int(ey + h * 0.28), w * 0.16, HIGHLIGHT_COLOR)
+      rl.draw_circle(int(ex + w * 0.62), int(ey + h * 0.48), w * 0.08, HIGHLIGHT_SMALL_COLOR)
 
   def _draw_wheel(self, cx: float, cy: float, radius: float, color: rl.Color) -> None:
     """핸들 아이콘: 두꺼운 림 + 스포크 3개 + 허브.
