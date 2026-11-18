@@ -132,6 +132,10 @@ LEAN_MAX_PX = 80.0            # 커브 쏠림 최대 이동량 (px)
 LEAN_PER_LAT_ACCEL = 28.0     # 횡가속도 1 m/s²당 쏠림 (px)
 LAT_ACCEL_SHOW_MIN = 0.5      # 횡가속도 표시 최소값 (m/s²)
 HUD_GAP_REFRESH_SEC = 0.5     # 차간거리 파라미터 읽기 주기
+HUD_SCALE_MIN = 0.5           # HUD 최소 스케일. 화면 높이에 비례한 scale을
+# 그대로 쓰면 mici(0.22배)에서 속도 글자가 20px·핸들 반지름 8px로 너무
+# 작아 운전 중 읽히지 않는다. HUD 요소는 0.5배 아래로 줄이지 않는다
+# (BIG_UI에서는 scale 1.0이라 그대로).
 
 # 절대 픽셀값의 기준 화면 높이 (BIG_UI 1080). _render에서
 # scale = rect.height / REFERENCE_HEIGHT를 계산해 모든 절대값에 곱한다.
@@ -485,6 +489,8 @@ class RobotFaceView(Widget):
     # 화면 스케일: 절대 픽셀값은 1080 높이 기준이므로 rect 높이에 비례해
     # 조정한다. BIG_UI(1080)에서는 1.0, mici(240)에서는 약 0.22.
     scale = max(SCALE_MIN, min(SCALE_MAX, rect.height / REFERENCE_HEIGHT))
+    # HUD 스케일: 작은 화면에서도 읽히게 0.5 아래로 줄이지 않는다.
+    hud_scale = max(scale, HUD_SCALE_MIN)
 
     # 배경: 순수 검은 화면 (테두리 없음 — 콤마 화면 자체가 프레임이다)
     rl.draw_rectangle_rec(rect, rl.BLACK)
@@ -513,27 +519,27 @@ class RobotFaceView(Widget):
     # 인게이지 HUD (핸들·현재 속도·목표 속도·차간거리)
     if state == FaceState.ENGAGED:
       try:
-        self._draw_hud(rect, sig, scale)
+        self._draw_hud(rect, sig, hud_scale)
       except Exception:
         pass
 
-    # 횡가속도 표시 (커브 중, onroad에서만)
+    # 횡가속도 표시 (커브 중, onroad에서만). 커진 HUD와 겹치지 않게 위쪽에 표시.
     try:
       if ui_state.started and abs(sig.lat_accel) >= LAT_ACCEL_SHOW_MIN:
         draw_text_ui_style(f"횡가속도 {abs(sig.lat_accel):.1f} m/s²",
-                           rect.x + rect.width / 2.0, rect.y + rect.height * 0.78,
-                           36.0 * scale, HUD_DIM, align="center_bottom")
+                           rect.x + rect.width / 2.0, rect.y + rect.height * 0.20,
+                           36.0 * hud_scale, HUD_DIM, align="center_bottom")
     except Exception:
       pass
 
-    # 테스트 모드 안내 문구
+    # 테스트 모드 안내 문구 (커진 HUD와 겹치지 않게 위쪽에 표시)
     if snap.test != 0:
       label = f"표정 테스트: {FACE_NAMES.get(state, '')}"
       if not snap.enabled and self._test_since is not None:
         remaining = max(0, int(math.ceil(TEST_PREVIEW_SEC - (now - self._test_since))))
         label += f" ({remaining}초 후 자동 복귀)"
-      draw_text_ui_style(label, rect.x + rect.width / 2.0, rect.y + rect.height - 30.0 * scale,
-                         40.0 * scale, rl.WHITE, align="center_bottom")
+      draw_text_ui_style(label, rect.x + rect.width / 2.0, rect.y + rect.height * 0.08,
+                         40.0 * hud_scale, rl.WHITE, align="center_bottom")
 
     # 안전 알림은 얼굴 위에 그대로 표시
     self._alert_renderer.render(rect)
@@ -666,10 +672,27 @@ class RobotFaceView(Widget):
       rl.draw_circle(int(ex + w * 0.30), int(base_y + h * 0.28), w * 0.16, HIGHLIGHT_COLOR)
       rl.draw_circle(int(ex + w * 0.62), int(base_y + h * 0.48), w * 0.08, HIGHLIGHT_SMALL_COLOR)
 
+  def _draw_wheel(self, cx: float, cy: float, radius: float, color: rl.Color) -> None:
+    """핸들 아이콘: 두꺼운 림 + 스포크 3개 + 허브.
+    draw_circle_lines는 1px 테두리라 작은 화면에서 림이 안 보여 별처럼
+    보였기 때문에, 림은 바깥 원(색) + 안쪽 원(검정)으로 두꺼운 고리를
+    만든다 (림 두께 = 반지름의 20%). 스포크는 반지름의 14%, 허브는 18%."""
+    # 림: 바깥 원 + 안쪽 검은 원 = 두꺼운 고리
+    rl.draw_circle(int(cx), int(cy), radius, color)
+    rl.draw_circle(int(cx), int(cy), radius * 0.80, rl.BLACK)
+    # 스포크 3개 (아래 1개 + 위 좌우 2개)
+    for angle_deg in (90.0, 210.0, 330.0):
+      a = math.radians(angle_deg)
+      rl.draw_line_ex(
+        rl.Vector2(cx, cy),
+        rl.Vector2(cx + radius * 0.88 * math.cos(a), cy + radius * 0.88 * math.sin(a)),
+        radius * 0.14, color)
+    # 허브
+    rl.draw_circle(int(cx), int(cy), radius * 0.18, color)
+
   def _draw_wheel_flash(self, rect: rl.Rectangle, now: float, lean_x: float, scale: float = 1.0) -> None:
     """인게이지 직후 핸들 플래시: 두 눈 자리에 큰 핸들 아이콘 + 주변 반짝이.
-    핸들은 원 + 스포크 3개 + 허브, 인게이지 민트색. 0.8초 후 민트 눈 + HUD로
-    이어진다."""
+    0.8초 후 민트 눈 + HUD로 이어진다."""
     cx = rect.x + rect.width / 2.0 + lean_x
     cy = rect.y + rect.height / 2.0
     eye_h = rect.height * 0.34
@@ -677,15 +700,7 @@ class RobotFaceView(Widget):
     gap = eye_w * 1.0
     half_span = eye_w / 2.0 + gap / 2.0
     # 핸들: 눈 한 쌍이 차지하던 자리 중앙에 크게 그린다.
-    wheel_r = eye_h * 0.7
-    rl.draw_circle_lines(int(cx), int(cy), wheel_r, WHEEL_FLASH_COLOR)
-    for angle_deg in (90.0, 210.0, 330.0):
-      a = math.radians(angle_deg)
-      rl.draw_line_ex(
-        rl.Vector2(cx, cy),
-        rl.Vector2(cx + wheel_r * math.cos(a), cy + wheel_r * math.sin(a)),
-        wheel_r * 0.08, WHEEL_FLASH_COLOR)
-    rl.draw_circle(int(cx), int(cy), wheel_r * 0.12, WHEEL_FLASH_COLOR)
+    self._draw_wheel(cx, cy, eye_h * 0.7, WHEEL_FLASH_COLOR)
     # 핸들 주변 작은 반짝이
     for i, (dx, dy) in enumerate(((-half_span - eye_w * 0.7, -eye_h * 0.7),
                                   (half_span + eye_w * 0.7, -eye_h * 0.6),
@@ -771,7 +786,9 @@ class RobotFaceView(Widget):
     rl.draw_line_ex(rl.Vector2(tip_x, cy), rl.Vector2(base_x, cy + size / 2.0), 10.0 * scale, CHEVRON_COLOR)
 
   def _draw_hud(self, rect: rl.Rectangle, sig: _Signals, scale: float = 1.0) -> None:
-    """인게이지 HUD: 핸들 아이콘·현재 속도·목표 속도·차간거리 (하단)."""
+    """인게이지 HUD: 핸들 아이콘·현재 속도·목표 속도·차간거리 (하단).
+    scale은 _render에서 계산한 hud_scale(0.5 하한)을 받는다 — 작은 화면에서도
+    속도 글자·핸들·막대가 읽힐 크기로 유지된다."""
     try:
       is_metric = bool(ui_state.is_metric)
     except Exception:
@@ -779,17 +796,9 @@ class RobotFaceView(Widget):
     hud_y = rect.y + rect.height * 0.88
     cx = rect.x + rect.width / 2.0
 
-    # 핸들 아이콘 (왼쪽): 원 + 스포크 3개, 녹색
+    # 핸들 아이콘 (왼쪽): 두꺼운 림 + 스포크 3개 + 허브, 녹색
     wheel_x = rect.x + rect.width * 0.15
-    wheel_r = 35.0 * scale
-    rl.draw_circle_lines(int(wheel_x), int(hud_y), wheel_r, HUD_GREEN)
-    for angle_deg in (90.0, 210.0, 330.0):
-      a = math.radians(angle_deg)
-      rl.draw_line_ex(
-        rl.Vector2(wheel_x, hud_y),
-        rl.Vector2(wheel_x + wheel_r * math.cos(a), hud_y + wheel_r * math.sin(a)),
-        6.0 * scale, HUD_GREEN)
-    rl.draw_circle(int(wheel_x), int(hud_y), 7.0 * scale, HUD_GREEN)
+    self._draw_wheel(wheel_x, hud_y, 35.0 * scale, HUD_GREEN)
 
     # 현재 속도 (가운데, 크게)
     speed_conv = MS_TO_KPH if is_metric else MS_TO_MPH
@@ -799,10 +808,11 @@ class RobotFaceView(Widget):
                        align="center_bottom")
     draw_text_ui_style(speed_unit, cx - 60.0 * scale, hud_y + 55.0 * scale, 30.0 * scale, HUD_DIM,
                        align="center_bottom")
-    # 목표 속도 (현재 속도 오른쪽, 작게)
+    # 목표 속도 (현재 속도 오른쪽, 작게). SET 라벨은 목표 숫자와 겹치지 않게
+    # 위로 띄운다 (숫자가 커져서 기존 -25 오프셋이면 겹친다).
     if sig.v_cruise_kph > 0.0:
       target = sig.v_cruise_kph if is_metric else sig.v_cruise_kph * KPH_TO_MPH
-      draw_text_ui_style("SET", cx + 130.0 * scale, hud_y - 25.0 * scale, 28.0 * scale, HUD_DIM,
+      draw_text_ui_style("SET", cx + 130.0 * scale, hud_y - 45.0 * scale, 28.0 * scale, HUD_DIM,
                          align="center_bottom")
       draw_text_ui_style(f"{int(round(target))}", cx + 130.0 * scale, hud_y + 10.0 * scale, 55.0 * scale, HUD_TEXT,
                          align="center_bottom")
