@@ -3,6 +3,7 @@
 import { dashcamReadStateStore } from "./dashcam_player_session.js";
 import { createLogsSegmentStatusTag } from "./player/components.js";
 import { loadScreenrecordVideos } from "./screenrecord.js";
+import { refreshSteeringAnalysis } from "./steering_analysis.js";
 import { openRouteSummary } from "./route_summary/index.js";
 import {
   formatLogBytes,
@@ -1062,6 +1063,7 @@ async function loadDashcamSegments(route) {
 }
 
 async function loadDashcamRoutes({ silent = false, append = false } = {}) {
+  if (!append) void refreshSteeringAnalysis();
   if (append && (!dashcamState.hasMore || dashcamState.loading || dashcamState.loadingMore)) return;
   const seq = ++dashcamState.loadSeq;
   if (append) {

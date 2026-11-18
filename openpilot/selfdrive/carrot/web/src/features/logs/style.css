@@ -1421,3 +1421,21 @@
     font-size: 12.5px;
   }
 }
+
+#dashcamSteeringAnalysis {
+  padding: var(--sp-xs) var(--logs-content-inline);
+  color: var(--md-on-surface-var);
+  font-size: var(--fs-body-sm);
+}
+
+#dashcamSteeringAnalysis:empty {
+  display: none;
+}
+
+#latestSteeringReport p {
+  margin: 0;
+}
+
+#latestSteeringReport a {
+  color: var(--md-primary);
+}

@@ -25,6 +25,7 @@ from .catalog import (
 from .ffmpeg import browser_video, ensure_preview, ensure_thumbnail
 from .report import build_route_report
 from .read_state import read_dashcam_read_state, write_dashcam_recent_segment
+from .steering_analysis import api_steering_analysis, steering_context
 from .summary_sources import build_route_summary_source
 from .paths import (
   file_size_label,
@@ -579,6 +580,8 @@ async def api_dashcam_read_state_update(request: web.Request) -> web.Response:
 
 
 def register(app: web.Application) -> None:
+  app.cleanup_ctx.append(steering_context)
+  app.router.add_get("/api/dashcam/steering-analysis", api_steering_analysis)
   app.router.add_get("/api/dashcam/routes", api_dashcam_routes)
   app.router.add_get("/api/dashcam/read-state", api_dashcam_read_state)
   app.router.add_post("/api/dashcam/read-state", api_dashcam_read_state_update)
