@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from statistics import median
 
-from cluster_vehicle_models import ego_model_name
+from cluster_vehicle_models import K8_EGO_SCALE, ego_model_name
 
 from cluster_config import (
     AMBER,
@@ -3085,12 +3085,13 @@ EV6_EGO_WIDTH_M = 1.88 / 0.878
 EV6_EGO_HEIGHT_M = 1.55 / 1.065
 
 
-def ev6_ego_vehicle_box(box: VehicleBox) -> VehicleBox:
+def _scale_ego_vehicle_box(box: VehicleBox, scale: tuple[float, float, float], model_name: str) -> VehicleBox:
     # keep the front bumper where it was (the path, lead distance and radar overlay are measured from it)
-    back = (EV6_EGO_LENGTH_M - box.length_m) * 0.5
+    width, length, height = scale
+    back = (length - box.length_m) * 0.5
     center = Vec3(box.center.x - box.forward_x * back, box.center.y - box.forward_y * back,
-                  box.center.z + (EV6_EGO_HEIGHT_M - box.height_m) * 0.5)
-    return replace(box, center=center, width_m=EV6_EGO_WIDTH_M, length_m=EV6_EGO_LENGTH_M, height_m=EV6_EGO_HEIGHT_M)
+                  box.center.z + (height - box.height_m) * 0.5)
+    return replace(box, center=center, width_m=width, length_m=length, height_m=height, model_name=model_name)
 
 
 def clean_ui_enabled() -> bool:
@@ -3809,11 +3810,14 @@ def build_cluster_scene(
         camera_active,
         target_offset,
     )
-    if clean_ui_enabled():
-        model_name = ego_model_name(state.car_fingerprint)
+    model_name = ego_model_name(state.car_fingerprint)
+    if model_name == "k8":
+        ego_vehicle = _scale_ego_vehicle_box(ego_vehicle, K8_EGO_SCALE, model_name)
+    elif clean_ui_enabled():
         if model_name == "ev6":
-            ego_vehicle = ev6_ego_vehicle_box(ego_vehicle)
-        ego_vehicle = replace(ego_vehicle, model_name=model_name)
+            ego_vehicle = _scale_ego_vehicle_box(ego_vehicle, (EV6_EGO_WIDTH_M, EV6_EGO_LENGTH_M, EV6_EGO_HEIGHT_M), model_name)
+        else:
+            ego_vehicle = replace(ego_vehicle, model_name=model_name)
     show_ego_vehicle = not cluster_camera_view_is_road_camera(state.camera_view_mode)
     merged_radar_labels = frozenset[str]()
     if route_mode:

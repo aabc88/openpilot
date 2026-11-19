@@ -1,4 +1,4 @@
-"""P/R-only integration: gear transitions, dormant driving UI and GPU ownership."""
+"""Cluster vehicle identity, gear transitions, dormant driving UI and GPU ownership."""
 from dataclasses import replace
 from pathlib import Path
 import sys
@@ -14,7 +14,7 @@ import cluster_scene
 from cluster_live import standby_state
 from cluster_renderer import ClusterUiRenderer
 from cluster_route_replay import RouteLogParser, frame_to_state
-from cluster_vehicle_models import EGO_MODEL_FINGERPRINTS, ego_model_name
+from cluster_vehicle_models import EGO_MODEL_FINGERPRINTS, K8_EGO_SCALE, ego_model_name
 
 
 @pytest.fixture(autouse=True)
@@ -39,7 +39,7 @@ def test_imported_driving_layout_cannot_be_enabled_by_environment(monkeypatch, o
 @pytest.mark.parametrize("fingerprint,name", list(EGO_MODEL_FINGERPRINTS.items()) + [
   ("KIA_EV6", "ev6"), ("KIA_EV6_PE", "ev6"), ("HYUNDAI_IONIQ_6", "ev6"), ("", "ev6"), ("unknown", "ev6"),
 ])
-def test_park_identity_does_not_replace_the_driving_ego(fingerprint, name):
+def test_only_k8_park_identity_replaces_the_driving_ego(fingerprint, name):
   parser = RouteLogParser(recompute_cutins=False)
   parser._update_car_params(SimpleNamespace(brand="hyundai", carFingerprint=fingerprint))
   frame = parser._frame_from_car_state(SimpleNamespace(), 1.0)
@@ -47,8 +47,26 @@ def test_park_identity_does_not_replace_the_driving_ego(fingerprint, name):
   assert state.car_fingerprint == fingerprint
   assert ego_model_name(state.car_fingerprint) == name
   ego = next(v for v in cluster_scene.build_cluster_scene(state).vehicles if not v.source)
-  assert ego.model_name == "cybertruck"
-  assert ego.length_m != cluster_scene.EV6_EGO_LENGTH_M
+  if name == "k8":
+    assert ego.model_name == "k8"
+    assert (ego.width_m, ego.length_m, ego.height_m) == K8_EGO_SCALE
+  else:
+    assert ego.model_name == "cybertruck"
+    assert ego.length_m != cluster_scene.EV6_EGO_LENGTH_M
+
+
+def test_k8_keeps_the_driving_model_front_bumper_anchor():
+  state = replace(standby_state(), onroad=True, steering=0.2)
+  stock = cluster_scene.build_cluster_scene(state).vehicles[0]
+  k8 = cluster_scene.build_cluster_scene(replace(state, car_fingerprint="KIA_K8_HEV_1ST_GEN")).vehicles[0]
+
+  def bumper(ego):
+    return (ego.center.x + ego.forward_x * ego.length_m * 0.5,
+            ego.center.y + ego.forward_y * ego.length_m * 0.5)
+
+  assert k8.model_name == "k8"
+  assert bumper(k8) == pytest.approx(bumper(stock))
+  assert (k8.center.z - k8.height_m * 0.5) == pytest.approx(stock.center.z - stock.height_m * 0.5)
 
 
 def test_identity_changes_invalidate_scene_cache():

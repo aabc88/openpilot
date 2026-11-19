@@ -1,0 +1,491 @@
+newmtl rgb_eceef0
+Kd 0.92549 0.93333 0.94118
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_f5f5f6
+Kd 0.96078 0.96078 0.96471
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_4c5258
+Kd 0.29804 0.32157 0.34510
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_25292c
+Kd 0.14510 0.16078 0.17255
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_24272b
+Kd 0.14118 0.15294 0.16863
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_30363a
+Kd 0.18824 0.21176 0.22745
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_586167
+Kd 0.34510 0.38039 0.40392
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_f4fbff
+Kd 0.95686 0.98431 1.00000
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_969da1
+Kd 0.58824 0.61569 0.63137
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_0d1215
+Kd 0.05098 0.07059 0.08235
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_546067
+Kd 0.32941 0.37647 0.40392
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_14191d
+Kd 0.07843 0.09804 0.11373
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_373d40
+Kd 0.21569 0.23922 0.25098
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_72797e
+Kd 0.44706 0.47451 0.49412
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_101417
+Kd 0.06275 0.07843 0.09020
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_282e32
+Kd 0.15686 0.18039 0.19608
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_23282c
+Kd 0.13725 0.15686 0.17255
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_1c2125
+Kd 0.10980 0.12941 0.14510
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_868e93
+Kd 0.52549 0.55686 0.57647
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_c0c7cb
+Kd 0.75294 0.78039 0.79608
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_10161b
+Kd 0.06275 0.08627 0.10588
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_8d9aa2
+Kd 0.55294 0.60392 0.63529
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_353b3e
+Kd 0.20784 0.23137 0.24314
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_a7afb3
+Kd 0.65490 0.68627 0.70196
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_e9edf0
+Kd 0.91373 0.92941 0.94118
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_030507
+Kd 0.01176 0.01961 0.02745
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_252c32
+Kd 0.14510 0.17255 0.19608
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_64727e
+Kd 0.39216 0.44706 0.49412
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_c1cbd0
+Kd 0.75686 0.79608 0.81569
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_25292f
+Kd 0.14510 0.16078 0.18431
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_181b20
+Kd 0.09412 0.10588 0.12549
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_f52737
+Kd 0.96078 0.15294 0.21569
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_ff5450
+Kd 1.00000 0.32941 0.31373
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_767e84
+Kd 0.46275 0.49412 0.51765
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_c8ced2
+Kd 0.78431 0.80784 0.82353
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_42474b
+Kd 0.25882 0.27843 0.29412
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_e1e5e8
+Kd 0.88235 0.89804 0.90980
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_303338
+Kd 0.18824 0.20000 0.21961
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_202428
+Kd 0.12549 0.14118 0.15686
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_c7cdd1
+Kd 0.78039 0.80392 0.81961
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_9da5aa
+Kd 0.61569 0.64706 0.66667
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_9a262d
+Kd 0.60392 0.14902 0.17647
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_a8b1b5
+Kd 0.65882 0.69412 0.70980
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_171a1d
+Kd 0.09020 0.10196 0.11373
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_222529
+Kd 0.13333 0.14510 0.16078
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_242629
+Kd 0.14118 0.14902 0.16078
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_25272a
+Kd 0.14510 0.15294 0.16471
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_26282a
+Kd 0.14902 0.15686 0.16471
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_27292b
+Kd 0.15294 0.16078 0.16863
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_202326
+Kd 0.12549 0.13725 0.14902
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_181a1c
+Kd 0.09412 0.10196 0.10980
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_16181a
+Kd 0.08627 0.09412 0.10196
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_181a1d
+Kd 0.09412 0.10196 0.11373
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_292c2e
+Kd 0.16078 0.17255 0.18039
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_1c1e20
+Kd 0.10980 0.11765 0.12549
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_4e5151
+Kd 0.30588 0.31765 0.31765
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_4a4d51
+Kd 0.29020 0.30196 0.31765
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_2b2d31
+Kd 0.16863 0.17647 0.19216
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_3a3e41
+Kd 0.22745 0.24314 0.25490
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_111316
+Kd 0.06667 0.07451 0.08627
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_272a2d
+Kd 0.15294 0.16471 0.17647
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_dbdde1
+Kd 0.85882 0.86667 0.88235
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_e3e4e6
+Kd 0.89020 0.89412 0.90196
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_383b3f
+Kd 0.21961 0.23137 0.24706
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_222528
+Kd 0.13333 0.14510 0.15686
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_cdced0
+Kd 0.80392 0.80784 0.81569
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_22272b
+Kd 0.13333 0.15294 0.16863
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_414950
+Kd 0.25490 0.28627 0.31373
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_2c333b
+Kd 0.17255 0.20000 0.23137
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_464e55
+Kd 0.27451 0.30588 0.33333
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_343e47
+Kd 0.20392 0.24314 0.27843
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_bdc4c9
+Kd 0.74118 0.76863 0.78824
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_3b4147
+Kd 0.23137 0.25490 0.27843
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_566573
+Kd 0.33725 0.39608 0.45098
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_959ea4
+Kd 0.58431 0.61961 0.64314
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_d9dfe2
+Kd 0.85098 0.87451 0.88627
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_848f96
+Kd 0.51765 0.56078 0.58824
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_9ca4a9
+Kd 0.61176 0.64314 0.66275
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_c5cdd1
+Kd 0.77255 0.80392 0.81961
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_e0e5e7
+Kd 0.87843 0.89804 0.90588
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_afb9c0
+Kd 0.68627 0.72549 0.75294
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2
+
+newmtl rgb_c4cdd3
+Kd 0.76863 0.80392 0.82745
+Ks 0.20 0.20 0.20
+Ns 38
+illum 2

@@ -98,6 +98,9 @@ from cluster_models import (
 )
 from cluster_scene import (
     ClusterScene,
+    EV6_EGO_HEIGHT_M,
+    EV6_EGO_LENGTH_M,
+    EV6_EGO_WIDTH_M,
     MeshStrip,
     RADAR_STATIC_OBJECT_SPEED_KPH,
     RadarPointMarker,
@@ -108,7 +111,7 @@ from cluster_scene import (
     cluster_scene_state_key,
 )
 from cluster_system_monitor import SystemStats, SystemStatsSampler
-from cluster_vehicle_models import ego_model_name
+from cluster_vehicle_models import K8_EGO_SCALE, ego_model_name
 from cluster_utils import blink_visible, clamp
 
 
@@ -120,6 +123,7 @@ KAIGEN_GOTHIC_KR_BOLD_FONT_PATH = OPENPILOT_FONT_DIR / "KaiGenGothicKR-Bold.ttf"
 JETBRAINS_MONO_FONT_PATH = OPENPILOT_FONT_DIR / "JetBrainsMono-Medium.ttf"
 VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "cybertruck" / "cybertruck_cluster.obj"
 PARK_VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "ev6" / "ev6_cluster.obj"
+K8_VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "k8" / "k8_cluster.obj"
 OTHER_VEHICLE_MODELS_DIR = CLUSTER_DIR / "assets" / "models" / "others"
 OTHER_VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "generic" / "generic_car_cluster.obj"
 TPMS_CAR_ICON_PATH = CLUSTER_DIR / "assets" / "images" / "tpms_toy_car.png"
@@ -1227,6 +1231,7 @@ class ClusterUiRenderer:
     _other_vehicle_names = ()
     _other_vehicle_paint = ()
     _vehicle_shaders = ()
+    _k8_vehicle_model = None
     _cutin_hold = None
     panel_layout = CLUSTER_PANEL_LAYOUT_DRIVING_LEFT
 
@@ -1286,6 +1291,8 @@ class ClusterUiRenderer:
         self._nv12_dmabuf_pool_disabled = False
         self._vehicle_model = None
         self._vehicle_model_load_attempted = False
+        self._k8_vehicle_model = None
+        self._k8_vehicle_model_load_attempted = False
         self._park_vehicle_model = None
         self._park_vehicle_models_loaded = False
         self._other_vehicle_models: list[object] = []
@@ -1705,6 +1712,10 @@ class ClusterUiRenderer:
         if self._vehicle_model is not None:
             rl.unload_model(self._vehicle_model)
             self._vehicle_model = None
+        if self._k8_vehicle_model is not None:
+            rl.unload_model(self._k8_vehicle_model)
+            self._k8_vehicle_model = None
+        self._k8_vehicle_model_load_attempted = False
         if self._park_vehicle_model is not None:
             rl.unload_model(self._park_vehicle_model)
             self._park_vehicle_model = None
@@ -1924,12 +1935,22 @@ class ClusterUiRenderer:
                             DESIGN_HEIGHT / 2, 24, (255, 255, 255), "center")
 
     def _ego_model(self, name: str):
+        if name == "k8" and self._k8_vehicle_model is not None:
+            return self._k8_vehicle_model, name
         names = getattr(self, "_other_vehicle_names", ())
         if name in names:
             index = names.index(name)
             self._set_other_paint(index, None)
             return self._other_vehicle_models[index], name
         return self._park_vehicle_model, "ev6"
+
+    @staticmethod
+    def _ego_model_scale(name: str) -> tuple[float, float, float]:
+        if name == "k8":
+            return K8_EGO_SCALE
+        if name == "ev6":
+            return EV6_EGO_WIDTH_M, EV6_EGO_LENGTH_M, EV6_EGO_HEIGHT_M
+        return 1.82, 4.35, 1.35
 
     def _close_park_textures(self) -> None:
         textures = list(self._ev6_park_textures or ())
@@ -1971,16 +1992,13 @@ class ClusterUiRenderer:
         self._park_model_key = None
         target = image = texture = None
         try:
-            from cluster_scene import EV6_EGO_HEIGHT_M, EV6_EGO_LENGTH_M, EV6_EGO_WIDTH_M
-
             camera = rl.Camera3D(rl.Vector3(-6.5, 7.5, 4.0), rl.Vector3(0.0, 0.0, 0.75),
                                  rl.Vector3(0.0, 0.0, 1.0), 32.0, rl.CameraProjection.CAMERA_PERSPECTIVE)
             view = rl.ffi.new("float[]", [camera.position.x, camera.position.y, camera.position.z])
             for shader, loc in self._vehicle_shaders:
                 if loc >= 0:
                     rl.set_shader_value(shader, loc, view, rl.ShaderUniformDataType.SHADER_UNIFORM_VEC3)
-            scale = ((EV6_EGO_WIDTH_M, EV6_EGO_LENGTH_M, EV6_EGO_HEIGHT_M) if key == "ev6"
-                     else (1.82, 4.35, 1.35))
+            scale = self._ego_model_scale(key)
             target = rl.load_render_texture(800, 480)
             rl.begin_texture_mode(target)
             try:
@@ -2208,7 +2226,8 @@ class ClusterUiRenderer:
                 rl.draw_ellipse(int(car_cx), int(car_bottom - 10), int(330 * k), int(30 * k),
                                 rl.Color(0, 0, 0, 8 if theme.is_dark else 7))
             texture = self._park_model_texture
-            if ego_model_name(state.car_fingerprint) == "ev6":
+            name = ego_model_name(state.car_fingerprint)
+            if name == "ev6" or (name == "k8" and self._k8_vehicle_model is None):
                 texture = self._ev6_park_car_texture(theme.is_dark) or texture
             if texture is not None:
                 car_w = car_h * texture.width / max(1, texture.height)
@@ -2288,15 +2307,15 @@ class ClusterUiRenderer:
         return camera
 
     def _ev6_draw_reverse_car_model(self, state: ClusterUiState) -> None:
-        from cluster_scene import EV6_EGO_HEIGHT_M, EV6_EGO_LENGTH_M, EV6_EGO_WIDTH_M
-
         model, key = self._ego_model(ego_model_name(state.car_fingerprint))
         if model is None:
             return
-        scale = ((EV6_EGO_WIDTH_M, EV6_EGO_LENGTH_M, EV6_EGO_HEIGHT_M) if key == "ev6" else (1.82, 4.35, 1.35))
+        scale = self._ego_model_scale(key)
+        # Align the drawn K8 rear bumper with the reverse guide's existing origin.
+        y = EV6_REVERSE_REAR_BUMPER_Y_M + scale[1] * 0.5 if key == "k8" else 0.0
         rl.rl_disable_backface_culling()
         try:
-            rl.draw_model_ex(model, rl.Vector3(0.0, 0.0, 0.035), rl.Vector3(0.0, 0.0, 1.0), 0.0,
+            rl.draw_model_ex(model, rl.Vector3(0.0, y, 0.035), rl.Vector3(0.0, 0.0, 1.0), 0.0,
                              rl.Vector3(*scale), rl.WHITE)
         finally:
             rl.rl_enable_backface_culling()
@@ -2470,7 +2489,9 @@ class ClusterUiRenderer:
         return max(0, min(EV6_REVERSE_PATH_STEPS, int(round(travelled / EV6_REVERSE_PATH_LENGTH_M * EV6_REVERSE_PATH_STEPS))))
 
     def _prepare_trip_report_cache(self, state: ClusterUiState, now: float | None = None) -> None:
-        """Refresh the expensive trip-report panel outside the active frame target."""
+        """Prepare vehicle models and cached panels outside the active frame target."""
+        if ego_model_name(getattr(state, "car_fingerprint", "")) == "k8":
+            self._load_k8_vehicle_model()
         if self._ev6_park_screen_active(state) or self._ev6_reverse_screen_active(state):
             self._load_park_vehicle_models()
             self._prepare_park_model_texture(state)
@@ -2570,6 +2591,11 @@ class ClusterUiRenderer:
         theme: ClusterTheme,
     ) -> ClusterScene:
         cache_key = (*cluster_scene_state_key(state), highlight_lane_lit, theme, clean_ui_enabled())
+        if ego_model_name(state.car_fingerprint) == "k8":
+            k8_available = self._k8_vehicle_model is not None
+            cache_key = (*cache_key, k8_available)
+            if not k8_available:
+                state = replace(state, car_fingerprint="")
         if self._scene_cache is not None and cache_key == self._scene_cache_key:
             return self._scene_cache
         scene = build_cluster_scene(
@@ -3846,17 +3872,33 @@ class ClusterUiRenderer:
         self._park_vehicle_models_loaded = True
         if PARK_VEHICLE_MODEL_PATH.exists():
             try:
-                mesh = self._load_obj_mesh(PARK_VEHICLE_MODEL_PATH, park_materials=True)
-                rl.upload_mesh(rl.ffi.addressof(mesh), False)
-                model = rl.load_model_from_mesh(mesh)
-                if rl.is_model_valid(model):
-                    self._park_vehicle_model = model
-                    self._attach_vehicle_shader(model)
-                else:
-                    rl.unload_model(model)
+                self._park_vehicle_model = self._load_shaded_vehicle_model(PARK_VEHICLE_MODEL_PATH)
             except Exception as exc:
                 print(f"Parked EV6 fallback model load failed: {exc}")
         self._other_vehicle_models = self._load_other_vehicle_models()
+
+    def _load_k8_vehicle_model(self) -> None:
+        if self._k8_vehicle_model_load_attempted:
+            return
+        self._k8_vehicle_model_load_attempted = True
+        try:
+            self._k8_vehicle_model = self._load_shaded_vehicle_model(K8_VEHICLE_MODEL_PATH)
+        except Exception as exc:
+            print(f"K8 vehicle model load failed: {exc}", flush=True)
+
+    def _load_shaded_vehicle_model(self, path: Path):
+        mesh = self._load_obj_mesh(path, park_materials=True)
+        try:
+            rl.upload_mesh(rl.ffi.addressof(mesh), False)
+            model = rl.load_model_from_mesh(mesh)
+        except BaseException:
+            rl.unload_mesh(mesh)
+            raise
+        if not rl.is_model_valid(model):
+            rl.unload_model(model)
+            return None
+        self._attach_vehicle_shader(model)
+        return model
 
     def _load_other_vehicle_models(self) -> list[object]:
         # Lead / cut-in / confident side vehicles: every OBJ in assets/models/others (sorted), else the
@@ -4157,7 +4199,8 @@ class ClusterUiRenderer:
         scene_offset_x = driving_offset_x - view_shift_x
         if abs(scene_offset_x) > 0.001:
             rl.rl_viewport(int(round(scene_offset_x)), 0, self.width, self.height)
-        if clean_ui_enabled() and self._vehicle_shaders:
+        shade_k8 = self._k8_vehicle_model is not None and ego_model_name(state.car_fingerprint) == "k8"
+        if (shade_k8 or clean_ui_enabled()) and self._vehicle_shaders:
             view_pos = rl.ffi.new("float[]", [float(camera.position.x), float(camera.position.y), float(camera.position.z)])
             for vehicle_shader, view_loc in self._vehicle_shaders:
                 if view_loc >= 0:
@@ -4508,8 +4551,9 @@ class ClusterUiRenderer:
 
     def _draw_vehicle(self, vehicle: VehicleBox) -> None:
         source_marker = vehicle.source.startswith("modelV2") or vehicle.source in ("radarState", "radarPoint", "cornerRadar")
+        k8_ego = vehicle.model_name == "k8" and not vehicle.source and self._k8_vehicle_model is not None
         use_model = (
-            self._vehicle_model is not None
+            (k8_ego or self._vehicle_model is not None)
             and not source_marker
             and (not vehicle.source or vehicle.primary or vehicle.cut_in)
         )
@@ -4691,13 +4735,15 @@ class ClusterUiRenderer:
         )
 
     def _draw_vehicle_model(self, vehicle: VehicleBox) -> None:
-        if self._vehicle_model is None:
+        is_ego = not vehicle.source and not vehicle.primary and not vehicle.cut_in
+        k8_ego = is_ego and vehicle.model_name == "k8" and self._k8_vehicle_model is not None
+        model = self._k8_vehicle_model if k8_ego else self._vehicle_model
+        if model is None:
             return
         yaw_deg = math.degrees(math.atan2(-vehicle.forward_x, vehicle.forward_y))
         position = rl.Vector3(vehicle.center.x, vehicle.center.y, 0.035)
         rotation_axis = rl.Vector3(0.0, 0.0, 1.0)
         scale = rl.Vector3(vehicle.width_m, vehicle.length_m, vehicle.height_m)
-        is_ego = not vehicle.source and not vehicle.primary and not vehicle.cut_in
         if not is_ego and not vehicle.primary and not vehicle.cut_in and self._uses_other_model(vehicle):
             # side-lane vehicles: slightly smaller than lead vehicles (radar-only position)
             scale = rl.Vector3(vehicle.width_m * SIDE_VEHICLE_MODEL_SCALE, vehicle.length_m * SIDE_VEHICLE_MODEL_SCALE,
@@ -4705,8 +4751,7 @@ class ClusterUiRenderer:
         try:
             rl.rl_disable_backface_culling()
             alpha = int(92 + 163 * clamp(vehicle.confidence, 0.0, 1.0))
-            model = self._vehicle_model
-            if not clean_ui_enabled():
+            if k8_ego or not clean_ui_enabled():
                 tint = rl_color(vehicle.body_color) if vehicle.source == "radarPoint" else rl_color(WHITE, alpha)
             elif vehicle.source == "radarPoint":
                 tint = rl_color(vehicle.body_color)
@@ -5242,7 +5287,7 @@ class ClusterUiRenderer:
         toward the top and bottom edges. ~400 points at 10 FPS is cheap.
         """
         count = PREMIUM_PARTICLE_COUNT
-        center_y = PREMIUM_PARTICLE_WAVE_CENTER_Y
+        center_y = PREMIUM_PARTICLE_CENTER_Y
         for i in range(count):
             # x spans the full width; phase drifts with time for flow.
             x = (i / count) * DESIGN_WIDTH
