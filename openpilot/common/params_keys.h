@@ -404,6 +404,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
 
     {"RobotFaceUI", {PERSISTENT, BOOL, "0"}},
     {"RobotFaceTest", {PERSISTENT, INT, "0"}},
+    {"RobotFaceTestEngaged", {PERSISTENT, INT, "0"}},
 
     {"LateralTorqueCustom", {PERSISTENT, INT, "0"}},
     {"LateralTorqueAccelFactor", {PERSISTENT, INT, "2500"}},

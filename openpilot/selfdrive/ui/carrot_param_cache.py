@@ -89,6 +89,7 @@ class RealtimeUiParamSnapshot:
 class RobotFaceParamSnapshot:
   enabled: bool = False
   test: int = 0
+  test_engaged: int = 0  # 0=자동(실제 상태), 1=인게이지 강제, 2=디스인게이지 강제 (표정 테스트용)
 
 
 def read_border_params(params, params_memory) -> BorderParamSnapshot:
@@ -165,7 +166,16 @@ def read_robot_face_params(params) -> RobotFaceParamSnapshot:
       test = round(float(raw)) if raw is not None else 0
     except Exception:
       test = 0
-  return RobotFaceParamSnapshot(enabled=bool(enabled), test=min(max(test, 0), 25))
+  try:
+    test_engaged = int(params.get_int("RobotFaceTestEngaged"))
+  except Exception:
+    raw = _read_param_file(params, "RobotFaceTestEngaged")
+    try:
+      test_engaged = round(float(raw)) if raw is not None else 0
+    except Exception:
+      test_engaged = 0
+  return RobotFaceParamSnapshot(enabled=bool(enabled), test=min(max(test, 0), 25),
+                                test_engaged=min(max(test_engaged, 0), 2))
 
 
 def write_robot_face_test(params, value: int) -> None:

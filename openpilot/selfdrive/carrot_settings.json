@@ -763,7 +763,8 @@
           "zh": "UI",
           "params": [
             "RobotFaceUI",
-            "RobotFaceTest"
+            "RobotFaceTest",
+            "RobotFaceTestEngaged"
           ]
         }
       ]
@@ -5178,6 +5179,40 @@
           "油门介入",
           "急转弯",
           "双闪"
+        ]
+      }
+    },
+    {
+      "group": "EJ_UI",
+      "name": "RobotFaceTestEngaged",
+      "title": "테스트 인게이지 상태",
+      "descr": "표정 테스트 시 인게이지 상태를 강제합니다. 자동은 실제 주행 상태를 따릅니다.",
+      "egroup": "EJ_UI",
+      "etitle": "Test engage state",
+      "edescr": "Forces the engage state during face testing. Auto follows the real driving state.",
+      "cgroup": "EJ_UI",
+      "ctitle": "测试接合状态",
+      "cdescr": "表情测试时强制接合状态。自动跟随实际驾驶状态。",
+      "min": 0,
+      "max": 2,
+      "default": 0,
+      "unit": "raw",
+      "control": "select",
+      "options": {
+        "ko": [
+          "자동 (실제 상태)",
+          "인게이지",
+          "디스인게이지"
+        ],
+        "en": [
+          "Auto (real state)",
+          "Engaged",
+          "Disengaged"
+        ],
+        "zh": [
+          "自动 (实际状态)",
+          "已接合",
+          "未接合"
         ]
       }
     }

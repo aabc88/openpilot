@@ -316,6 +316,13 @@ class RobotFaceView(Widget):
     self._refresh_gap(now)
 
     sig = self._read_signals()
+    # 테스트 인게이지 오버라이드 (표정 테스트 중에만 적용 — 실주행에는 영향 없음):
+    # 1=인게이지 강제(HUD 표시), 2=디스인게이지 강제(HUD 숨김), 0=실제 상태
+    if snap.test != 0:
+      if snap.test_engaged == 1:
+        sig.engaged = True
+      elif snap.test_engaged == 2:
+        sig.engaged = False
     self._sig = sig
     self._update_transitions(sig, now)
     self._lane_change_dir = sig.lane_change_dir
