@@ -93,6 +93,7 @@ class FaceState(IntEnum):
   GAS_OVERRIDE = 23      # 가속 페달 개입
   SHARP_CURVE = 24       # 급커브
   HAZARD = 25            # 비상등
+  SLEEP = 26             # 잠자는 중 (긴 정차)
 
 
 FACE_NAMES = {
@@ -121,6 +122,7 @@ FACE_NAMES = {
   FaceState.GAS_OVERRIDE: "가속 페달 개입",
   FaceState.SHARP_CURVE: "급커브",
   FaceState.HAZARD: "비상등",
+  FaceState.SLEEP: "잠자는 중",
 }
 
 # 운전자 주의 표정을 띄우는 이벤트 (selfdrived가 발행하는 onroadEvents 이름)
@@ -144,6 +146,7 @@ LEAD_DEPART_V_MIN = 1.5       # m/s, 정지했던 앞차가 이 속도 이상으
 LEAD_DEPART_V_STOP = 0.5      # m/s, 이 미만이면 앞차가 정지한 것으로 본다
 TRANSIENT_SEC = 3.0           # 출발/주의 해제/디스인게이지/출발 인사/앞차 출발 표시 시간
 TRANSIENT_SHORT_SEC = 2.0     # 끼어들기/설정속도 표시 시간 (짧은 피드백)
+SLEEP_AFTER_SEC = 30.0        # 이 시간 이상 정지하면 잠자는 표정으로 전환
 TEST_PREVIEW_SEC = 10.0       # 토글 OFF 상태에서 표정 테스트 표시 시간
 BLINK_PERIOD_SEC = 2.2        # 눈 깜빡임 주기
 BLINK_DURATION_SEC = 0.12     # 눈이 감겼다 뜨는 시간
@@ -151,6 +154,9 @@ ENGAGE_FLASH_SEC = 0.8        # 인게이지 시 핸들 플래시 표시 시간
 BREATHE_PERIOD_SEC = 2.5      # 호흡(미세한 커짐/작아짐) 주기
 SPARKLE_COUNT = 3             # 반짝이 개수
 SPARKLE_PERIOD_SEC = 3.0      # 반짝이 깜빡임 사이클
+EYE_CENTER_Y = 0.46           # 눈 중심 높이 (화면 높이 비율). 하단 HUD와
+# 겹치지 않게 정중앙(0.50)보다 살짝 위로 올렸다. 눈·반짝이·꺾쇠·핸들
+# 플래시·Zzz·속도선이 모두 이 중심을 기준으로 그려진다.
 CHEVRON_SWEEP_SEC = 1.2       # 깜빡이 화살표 이동 주기 (눈 옆 → 화면 끝)
 CHEVRON_COUNT = 3             # 동시에 이동하는 화살표 개수 (경로에 균등 배치)
 CHEVRON_FADE = 0.1            # 이동 시작/끝에서 페이드 인/아웃하는 진행도 구간
@@ -210,13 +216,15 @@ EYE_PALETTES = {
   FaceState.GAS_OVERRIDE: (rl.Color(255, 245, 220, 255), rl.Color(255, 170, 70, 255), rl.Color(255, 150, 50, 36)),
   FaceState.SHARP_CURVE: (rl.Color(220, 245, 255, 255), rl.Color(80, 180, 255, 255), rl.Color(60, 160, 255, 36)),
   FaceState.HAZARD: (rl.Color(255, 245, 220, 255), rl.Color(255, 180, 60, 255), rl.Color(255, 160, 40, 36)),
+  FaceState.SLEEP: (rl.Color(200, 215, 245, 255), rl.Color(120, 150, 220, 255), rl.Color(100, 130, 200, 30)),
 }
 
 SHADOW_BAND_COLOR = rl.Color(120, 80, 50, 45)   # 윗꺼풀 그림자 띠
 HIGHLIGHT_COLOR = rl.Color(255, 255, 255, 235)  # 큰 하이라이트
 HIGHLIGHT_SMALL_COLOR = rl.Color(255, 255, 255, 130)  # 작은 하이라이트
 WHEEL_FLASH_COLOR = rl.Color(110, 230, 170, 255)  # 인게이지 핸들 플래시 (밝은 민트)
-LANE_LINE_COLOR = rl.Color(255, 255, 255, 90)  # 인게이지 차선 (희미한 흰색 점선)
+LANE_LINE_COLOR = rl.Color(255, 255, 255, 90)  # 인게이지 차선 (희미한 흰색 실선)
+LANE_FLOW_COLOR = rl.Color(255, 255, 255, 200)  # 차선 흐름 마커 (밝은 흰색)
 CHEVRON_RGB = (255, 165, 0)                     # 깜빡이 꺾쇠(< >) 색 (주황).
 # rl.ORANGE 같은 이름 있는 색 상수는 기기의 pyray에서 .r/.g/.b 속성이 없어
 # AttributeError로 UI가 죽는다 (2026-11-18 깜빡이 켜면 콤마 로고로 바뀜).
@@ -289,6 +297,7 @@ class RobotFaceView(Widget):
     self._lead_v_prev: float | None = None
     self._cut_in_time = -1e9
     self._lead_depart_time = -1e9
+    self._stop_since: float | None = None  # 정지 시작 시각 (잠자는 표정용)
 
     # 테스트 자동 복귀 추적
     self._test_prev = 0
@@ -529,6 +538,13 @@ class RobotFaceView(Widget):
     else:
       self._lead_v_prev = None
 
+    # 정지 시간 추적 (잠자는 표정용): 정지하면 타이머 시작, 움직이면 리셋
+    if sig.standstill or sig.v_ego < 0.1:
+      if self._stop_since is None:
+        self._stop_since = now
+    else:
+      self._stop_since = None
+
   def _pick_state(self, sig: _Signals, now: float) -> FaceState:
     if not ui_state.started:
       # offroad(책상)에서는 차량 신호가 없어 실시간 표정은 평소로 고정한다.
@@ -586,6 +602,11 @@ class RobotFaceView(Widget):
       return FaceState.PARKED
     if sig.traffic_jam:
       return FaceState.TRAFFIC_JAM
+    # 잠자는 중: 30초 이상 정지하면 (주차 제외). 인게이지 중이어도 잠들 수
+    # 있지만 HUD는 sig.engaged 기준이라 계속 보인다.
+    if ((sig.standstill or sig.v_ego < 0.1) and self._stop_since is not None
+        and now - self._stop_since >= SLEEP_AFTER_SEC):
+      return FaceState.SLEEP
     # 신호 대기: 인게이지 중이 아닐 때만. 크루즈로 정지(인게이지 + 정지)하면
     # WAITING으로 전환하지 않고 ENGAGED를 유지해 HUD가 계속 보인다.
     # 정지 표시는 눈 크기만 작아지는 것으로 대신한다 (_eye_transform 참조).
@@ -674,6 +695,13 @@ class RobotFaceView(Widget):
     # 급가속 속도선
     if state == FaceState.HARD_ACCEL:
       self._draw_speed_lines(rect, now, lean_x, motion_scale)
+
+    # 잠자는 중 Zzz — 오른쪽 눈 위에서 위로 떠오름
+    if state == FaceState.SLEEP:
+      try:
+        self._draw_zzz(rect, now, lean_x, motion_scale)
+      except Exception:
+        pass
 
     # 반짝이
     self._draw_sparkles(rect, state, now, lean_x, motion_scale)
@@ -800,6 +828,10 @@ class RobotFaceView(Widget):
     if state == FaceState.SHARP_CURVE:
       # 강하게 당겨지는 느낌: 가로로 늘어나고 세로로 눌림
       return 1.15, 0.90, 0.0, 0.0, 0.0
+    if state == FaceState.SLEEP:
+      # 깊게 감긴 눈 + 느린 호흡 (잠자는 중). PARKED보다 더 깊게 감김.
+      breathe_y = 4.0 * scale * math.sin(2.0 * math.pi * now / 4.0)
+      return 1.0, 0.06, 0.0, breathe_y, 0.0
     if state == FaceState.HAZARD:
       return 1.0, 1.0, 0.0, 0.0, 0.0
     return 1.0, 1.0, 0.0, 0.0, 0.0  # IDLE
@@ -814,10 +846,10 @@ class RobotFaceView(Widget):
 
     scale_x, scale_y, off_x, off_y, gaze_x = self._eye_transform(state, now, eye_w, eye_h, scale)
 
-    # 호흡: 급제동·운전자 주의·앞차 근접·끼어들기·사각지대·주차를 빼고
-    # 미세하게 커졌다 작아짐
+    # 호흡: 급제동·운전자 주의·앞차 근접·끼어들기·사각지대·주차·잠자는 중을 빼고
+    # 미세하게 커졌다 작아짐 (주차·잠자는 중은 자체 호흡을 _eye_transform에서 처리)
     if state not in (FaceState.HARD_BRAKE, FaceState.DM_ALERT, FaceState.LEAD_CLOSE,
-                     FaceState.CUT_IN, FaceState.BLIND_SPOT, FaceState.PARKED):
+                     FaceState.CUT_IN, FaceState.BLIND_SPOT, FaceState.PARKED, FaceState.SLEEP):
       breathe = 1.0 + 0.03 * math.sin(2.0 * math.pi * now / BREATHE_PERIOD_SEC)
       scale_x *= breathe
       scale_y *= breathe
@@ -826,9 +858,9 @@ class RobotFaceView(Widget):
         gaze_x += 10.0 * scale * math.sin(2.0 * math.pi * now / 7.0)
 
     # 깜빡임 (급제동·운전자 주의·앞차 근접·끼어들기·사각지대는 눈을 크게 뜬
-    # 상태, 주차는 감은 상태라 깜빡임 없음. 정체는 4초 주기로 느리게 깜빡인다)
+    # 상태, 주차·잠자는 중은 감은 상태라 깜빡임 없음. 정체는 4초 주기로 느리게 깜빡인다)
     if state not in (FaceState.HARD_BRAKE, FaceState.DM_ALERT, FaceState.LEAD_CLOSE,
-                     FaceState.CUT_IN, FaceState.BLIND_SPOT, FaceState.PARKED):
+                     FaceState.CUT_IN, FaceState.BLIND_SPOT, FaceState.PARKED, FaceState.SLEEP):
       period = TRAFFIC_JAM_BLINK_PERIOD if state == FaceState.TRAFFIC_JAM else BLINK_PERIOD_SEC
       t = now % period
       if t > period - BLINK_DURATION_SEC:
@@ -839,7 +871,7 @@ class RobotFaceView(Widget):
 
   def _draw_eyes(self, rect: rl.Rectangle, state: FaceState, now: float, lean_x: float, scale: float = 1.0) -> None:
     cx = rect.x + rect.width / 2.0 + lean_x
-    cy = rect.y + rect.height / 2.0
+    cy = rect.y + rect.height * EYE_CENTER_Y
 
     eye_w, eye_h, half_span, scale_x, scale_y, off_x, off_y, gaze_x = self._eye_geometry(rect, state, now, scale)
 
@@ -901,7 +933,7 @@ class RobotFaceView(Widget):
     """인게이지 직후 핸들 플래시: 두 눈 자리에 큰 핸들 아이콘 + 주변 반짝이.
     0.8초 후 민트 눈 + HUD로 이어진다."""
     cx = rect.x + rect.width / 2.0 + lean_x
-    cy = rect.y + rect.height / 2.0
+    cy = rect.y + rect.height * EYE_CENTER_Y
     eye_h = rect.height * 0.34
     eye_w = eye_h * 0.8
     gap = eye_w * 1.0
@@ -931,7 +963,7 @@ class RobotFaceView(Widget):
   def _draw_speed_lines(self, rect: rl.Rectangle, now: float, lean_x: float, scale: float = 1.0) -> None:
     """급가속 속도선: 각 눈 바깥쪽에 가로 선 2개씩. 속도감을 준다."""
     cx = rect.x + rect.width / 2.0 + lean_x
-    cy = rect.y + rect.height / 2.0
+    cy = rect.y + rect.height * EYE_CENTER_Y
     eye_h = rect.height * 0.34
     eye_w = eye_h * 0.8
     gap = eye_w * 1.0
@@ -946,17 +978,39 @@ class RobotFaceView(Widget):
         rl.draw_line_ex(rl.Vector2(x_inner, cy + dy), rl.Vector2(x_outer, cy + dy),
                         thickness, SPEED_LINE_COLOR)
 
+  def _draw_zzz(self, rect: rl.Rectangle, now: float, lean_x: float, scale: float = 1.0) -> None:
+    """잠자는 중 Zzz: 오른쪽 눈 위에서 3개가 위로 떠오르며 커졌다 사라짐.
+    3초 주기로 반복, 각 Z는 1초 간격으로 출발한다."""
+    cx = rect.x + rect.width / 2.0 + lean_x
+    cy = rect.y + rect.height * EYE_CENTER_Y
+    eye_h = rect.height * 0.34
+    eye_w = eye_h * 0.8
+    gap = eye_w * 1.0
+    half_span = eye_w / 2.0 + gap / 2.0
+    base_x = cx + half_span + eye_w * 0.6
+    base_y = cy - eye_h * 0.7
+    for i in range(3):
+      # 각 Z는 3초 주기에서 1초씩 어긋나게 출발
+      p = ((now + i * 1.0) % 3.0) / 3.0
+      if p < 0.05 or p > 0.95:
+        continue  # 시작/끝 페이드 구간에서는 숨김
+      alpha = int(255 * min(p / 0.15, (1.0 - p) / 0.15, 1.0))
+      size = (28.0 + 28.0 * p) * scale  # 떠오르며 커짐
+      x = base_x + 30.0 * scale * p
+      y = base_y - 60.0 * scale * p  # 위로 떠오름
+      draw_text_ui_style("Z", x, y, size, rl.Color(150, 180, 240, alpha), align="center")
+
   def _draw_sparkles(self, rect: rl.Rectangle, state: FaceState, now: float, lean_x: float, scale: float = 1.0) -> None:
-    """눈가에 드물게 떴다 사라지는 반짝이. 경고·주차 상태에서는 표시하지
-    않고, 급가속(속도선이 대신함)·정체(지루한 표정)·비상등(양쪽 화살표가
-    대신함)에서도 표시하지 않는다."""
+    """눈가에 드물게 떴다 사라지는 반짝이. 경고·주차·잠자는 중 상태에서는
+    표시하지 않고, 급가속(속도선이 대신함)·정체(지루한 표정)·비상등(양쪽
+    화살표가 대신함)에서도 표시하지 않는다."""
     if state in (FaceState.HARD_BRAKE, FaceState.DM_ALERT,
                  FaceState.HARD_ACCEL, FaceState.LEAD_CLOSE, FaceState.TRAFFIC_JAM,
-                 FaceState.PARKED, FaceState.CUT_IN, FaceState.BLIND_SPOT,
+                 FaceState.PARKED, FaceState.SLEEP, FaceState.CUT_IN, FaceState.BLIND_SPOT,
                  FaceState.HAZARD):
       return
     cx = rect.x + rect.width / 2.0 + lean_x
-    cy = rect.y + rect.height / 2.0
+    cy = rect.y + rect.height * EYE_CENTER_Y
     eye_h = rect.height * 0.34
     eye_w = eye_h * 0.8
     gap = eye_w * 1.0
@@ -981,7 +1035,7 @@ class RobotFaceView(Widget):
     꺾쇠 각도는 90도 — 팁 오프셋(가로)이 세로 절반과 같아 두 선이 직각으로
     만난다. 점멸 대신 이동 자체가 깜빡이 신호다."""
     cx = rect.x + rect.width / 2.0 + lean_x
-    cy = rect.y + rect.height / 2.0
+    cy = rect.y + rect.height * EYE_CENTER_Y
     eye_h = rect.height * 0.34
     eye_w = eye_h * 0.8
     gap = eye_w * 1.0
@@ -1009,31 +1063,47 @@ class RobotFaceView(Widget):
       rl.draw_line_ex(rl.Vector2(tip_x, cy), rl.Vector2(base_x, cy + size / 2.0), thickness, color)
 
   def _draw_lane_lines(self, rect: rl.Rectangle, lean_x: float, scale: float = 1.0) -> None:
-    """인게이지 차선: 눈 좌우에 원근감 있는 점선 차선 2개. 아래로 넓어지고
-    점선이 아래로 흘러가 차가 앞으로 나아가는 느낌을 준다. 눈 뒤에 그린다.
-    흐름 속도(_lane_flow)는 _render에서 속도에 비례해 누적한다."""
+    """인게이지 차선: 눈 좌우에 원근감 있는 실선 차선 2개. 아래로 넓어지고
+    아래쪽은 두껍게, 위쪽은 가늘게 그려 거리감을 준다. 눈 뒤에 그린다.
+    속도 감응 흐름 마커(_lane_flow)가 차선을 따라 아래로 흘러 차가 앞으로
+    나아가는 느낌을 준다. 흐름 속도(_lane_flow)는 _render에서 속도에 비례해
+    누적한다."""
     cx = rect.x + rect.width / 2.0 + lean_x
     top_y = rect.y + rect.height * 0.15
     bottom_y = rect.y + rect.height * 0.95
     # 위쪽은 좁게(눈 옆), 아래쪽은 넓게(화면 끝 가까이) — 원근감
     top_off = rect.width * 0.28
     bottom_off = rect.width * 0.45
-    thickness = 6.0 * scale
-    # 점선: 8개 구간, 속도 감응 흐름(_lane_flow)에 따라 아래로 흐른다
-    segments = 8
+    # 실선: 14개 구간으로 나눠 아래쪽은 두껍게(6.5), 위쪽은 가늘게(1.1) 그린다
+    segments = 14
+    thick_bottom = 6.5 * scale
+    thick_top = 1.1 * scale
     flow = self._lane_flow
     for sign in (-1, 1):
       for i in range(segments):
-        # 각 점선 조각의 시작/끝 진행도 (흐름 오프셋 적용, 끝에서 다시 위로)
-        p0 = ((i / segments) + flow / segments) % 1.0
-        p1 = p0 + 0.5 / segments
-        if p1 > 1.0:
-          continue  # 화면 아래를 벗어난 조각은 건너뜀
+        p0 = i / segments
+        p1 = (i + 1) / segments
+        # 구간 중심의 진행도로 두께를 보간한다 (아래쪽이 두꺼움)
+        p_mid = (p0 + p1) / 2.0
+        thickness = thick_top + (thick_bottom - thick_top) * p_mid
         x0 = cx + sign * (top_off + (bottom_off - top_off) * p0)
         x1 = cx + sign * (top_off + (bottom_off - top_off) * p1)
         y0 = top_y + (bottom_y - top_y) * p0
         y1 = top_y + (bottom_y - top_y) * p1
         rl.draw_line_ex(rl.Vector2(x0, y0), rl.Vector2(x1, y1), thickness, LANE_LINE_COLOR)
+      # 흐름 마커: 밝은 짧은 선이 차선을 따라 아래로 흐른다 (속도 비례)
+      marker_p = flow % 1.0
+      marker_len = 0.12
+      mp0 = marker_p
+      mp1 = marker_p + marker_len
+      if mp1 <= 1.0:
+        mx0 = cx + sign * (top_off + (bottom_off - top_off) * mp0)
+        mx1 = cx + sign * (top_off + (bottom_off - top_off) * mp1)
+        my0 = top_y + (bottom_y - top_y) * mp0
+        my1 = top_y + (bottom_y - top_y) * mp1
+        marker_thick = thick_top + (thick_bottom - thick_top) * ((mp0 + mp1) / 2.0)
+        rl.draw_line_ex(rl.Vector2(mx0, my0), rl.Vector2(mx1, my1),
+                        marker_thick * 1.2, LANE_FLOW_COLOR)
 
   def _draw_hud(self, rect: rl.Rectangle, sig: _Signals, scale: float = 1.0) -> None:
     """인게이지 HUD: 핸들 아이콘·현재 속도·목표 속도·차간거리 (하단).

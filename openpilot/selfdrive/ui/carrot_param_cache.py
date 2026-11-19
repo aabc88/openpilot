@@ -174,7 +174,7 @@ def read_robot_face_params(params) -> RobotFaceParamSnapshot:
       test_engaged = round(float(raw)) if raw is not None else 0
     except Exception:
       test_engaged = 0
-  return RobotFaceParamSnapshot(enabled=bool(enabled), test=min(max(test, 0), 25),
+  return RobotFaceParamSnapshot(enabled=bool(enabled), test=min(max(test, 0), 26),
                                 test_engaged=min(max(test_engaged, 0), 2))
 
 
