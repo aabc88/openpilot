@@ -13,7 +13,11 @@ from cluster_config import (
   CLUSTER_PANEL_LAYOUT_DRIVING_RIGHT,
   CLUSTER_SCREEN_MODE_DEBUG_SYSTEM,
   CLUSTER_SCREEN_MODE_FULLSCREEN_3D,
+  CLUSTER_SCREEN_MODE_PREMIUM,
   CLUSTER_SCREEN_MODE_TRIP_REPORT,
+  PREMIUM_CHAMPAGNE,
+  PREMIUM_CLUSTER_THEME,
+  PREMIUM_GOLD,
   cluster_camera_view_is_road_camera,
   cluster_camera_view_prefers_wide,
   cluster_wide_camera_zoom_factor,
@@ -91,3 +95,21 @@ def test_cluster_wide_camera_zoom_increases_smoothly_with_speed():
   assert factors == sorted(factors)
   assert factors[0] == 1.0
   assert factors[-1] == 1.55
+
+
+def test_cluster_screen_mode_eight_selects_premium():
+  assert CLUSTER_SCREEN_MODE_PREMIUM == 8
+  assert normalize_cluster_screen_mode(8) == CLUSTER_SCREEN_MODE_PREMIUM
+  assert normalize_cluster_screen_mode("premium") == CLUSTER_SCREEN_MODE_PREMIUM
+  assert normalize_cluster_screen_mode("PREMIUM") == CLUSTER_SCREEN_MODE_PREMIUM
+
+
+def test_premium_cluster_theme_gold_on_black():
+  assert PREMIUM_CLUSTER_THEME.name == "premium"
+  assert PREMIUM_CLUSTER_THEME.is_dark is True
+  assert PREMIUM_CLUSTER_THEME.bg == (0, 0, 0)
+  assert PREMIUM_CLUSTER_THEME.text == (255, 255, 255)
+  assert PREMIUM_CLUSTER_THEME.path_body == (212, 169, 92, 230)
+  assert PREMIUM_CLUSTER_THEME.path_highlight == (232, 200, 122, 245)
+  assert PREMIUM_GOLD == (212, 169, 92)
+  assert PREMIUM_CHAMPAGNE == (232, 200, 122)

@@ -53,9 +53,13 @@ from cluster_config import (
     CLUSTER_SCREEN_MODE_FULLSCREEN_3D,
     CLUSTER_SCREEN_MODE_NAVI,
     CLUSTER_SCREEN_MODE_NAV_MODEL,
+    CLUSTER_SCREEN_MODE_PREMIUM,
     CLUSTER_SCREEN_MODE_TRIP_REPORT,
     CLUSTER_SCREEN_MODE_DEFAULT,
     CLUSTER_SCREEN_MODE_DEBUG_SYSTEM,
+    PREMIUM_CHAMPAGNE,
+    PREMIUM_CLUSTER_THEME,
+    PREMIUM_GOLD,
     ClusterTheme,
     DESIGN_HEIGHT,
     DESIGN_WIDTH,
@@ -334,6 +338,22 @@ FULLSCREEN_3D_CLOCK_CENTER_X = DESIGN_WIDTH * 0.5
 FULLSCREEN_3D_TRAFFIC_PANEL_RIGHT = DESIGN_WIDTH - 28.0
 NAVI_MAP_BACKGROUND = (0, 0, 0, 255)
 TPMS_STATUS_CENTER_X = NAVI_LIVE_PANEL_X - 62.0
+
+# Premium mode (Kia ccNC style) layout constants.
+PREMIUM_PARTICLE_COUNT = 400
+PREMIUM_PARTICLE_WAVE_AMPLITUDE = 60.0
+PREMIUM_PARTICLE_WAVE_FREQ = 0.004
+PREMIUM_PARTICLE_FLOW_SPEED = 0.35
+PREMIUM_PARTICLE_CENTER_Y = DESIGN_HEIGHT * 0.5
+PREMIUM_TOP_BAR_H = 44.0
+PREMIUM_TOP_BAR_TIME_SIZE = 30.0
+PREMIUM_TOP_BAR_DATE_SIZE = 22.0
+PREMIUM_CHAMFER = 18.0
+PREMIUM_CARD_BORDER = (255, 255, 255, 51)
+PREMIUM_CARD_FILL = (0, 0, 0, 153)
+PREMIUM_SPEED_FONT_SIZE = 120.0
+PREMIUM_SPEED_PANEL_X = 40.0
+PREMIUM_SPEED_PANEL_Y = DESIGN_HEIGHT - 170.0
 TPMS_STATUS_VALUE_CENTER_Y = 429.5
 TPMS_STATUS_CAR_CENTER_Y = 429.5
 TPMS_STATUS_COLUMN_OFFSET = 29.5
@@ -1435,6 +1455,11 @@ class ClusterUiRenderer:
             self._profile_add("renderer.set_target_fps", profile_stage)
 
     def _current_theme(self) -> ClusterTheme:
+        # Premium mode always uses the gold-on-black premium theme,
+        # regardless of the user's dark/light theme setting.
+        if getattr(self, "screen_mode", CLUSTER_SCREEN_MODE_DEFAULT) == CLUSTER_SCREEN_MODE_PREMIUM:
+            self._theme = PREMIUM_CLUSTER_THEME
+            return self._theme
         self._theme = current_cluster_theme(self.theme_mode)
         return self._theme
 
@@ -5041,6 +5066,12 @@ class ClusterUiRenderer:
                 self._draw_navi_dashboard(state)
                 self._draw_status_footer(state)
                 return
+            if screen_mode == CLUSTER_SCREEN_MODE_PREMIUM:
+                profile_stage = self._profile_start()
+                self._draw_premium_hud(state, left_signal_lit, right_signal_lit)
+                self._profile_add("hud.premium", profile_stage)
+                self._draw_status_footer(state)
+                return
             navi_debug_active = state.navi_debug is not None
             navi_live_active = (
                 self._navi_live_panel_visible(state.navi_live)
@@ -5197,6 +5228,164 @@ class ClusterUiRenderer:
         while size > minimum_size and self._measure_text(text, size)[0] > max_width:
             size -= 2.0
         return self._ellipsize_text(text, size, max_width), size
+
+    # ── Premium mode (Kia ccNC style) ──────────────────────────────────
+    # Gold particle wave, chamfered cards, thin typography on pure black.
+    # Only active when screen_mode == CLUSTER_SCREEN_MODE_PREMIUM.
+
+    def _draw_premium_particle_wave(self, now: float) -> None:
+        """Gold/white dots flowing along sine waves across the screen.
+
+        Points are evenly spread across the full width; each point's y
+        follows a sine wave whose phase drifts with time, giving a flowing
+        wave. Amplitude is largest near the vertical center and fades
+        toward the top and bottom edges. ~400 points at 10 FPS is cheap.
+        """
+        count = PREMIUM_PARTICLE_COUNT
+        center_y = PREMIUM_PARTICLE_WAVE_CENTER_Y
+        for i in range(count):
+            # x spans the full width; phase drifts with time for flow.
+            x = (i / count) * DESIGN_WIDTH
+            phase = x * PREMIUM_PARTICLE_WAVE_FREQ * math.tau + now * PREMIUM_PARTICLE_FLOW_SPEED
+            # Two layered waves for depth: a slow large one + a fast small one.
+            wave = math.sin(phase) * 0.7 + math.sin(phase * 2.3 + 1.7) * 0.3
+            # Amplitude envelope: peak at center, fading toward edges.
+            envelope = 1.0 - abs((x / DESIGN_WIDTH) - 0.5) * 0.6
+            y = center_y + wave * PREMIUM_PARTICLE_WAVE_AMPLITUDE * envelope
+            # Alternate gold and white dots; size 1-3 px by wave position.
+            is_gold = (i % 3) != 0
+            size = 1.0 + (1.0 + wave) * 1.0
+            alpha = int(120 + (1.0 + wave) * 60)
+            color = PREMIUM_GOLD if is_gold else WHITE
+            rl.draw_circle(int(x), int(y), size, rl_color(color, min(255, alpha)))
+
+    def _draw_premium_chamfered_card(
+        self,
+        x: float,
+        y: float,
+        w: float,
+        h: float,
+        chamfer: float = PREMIUM_CHAMFER,
+    ) -> None:
+        """Octagonal card with diagonally cut corners (Kia ccNC style).
+
+        Fill: semi-transparent black. Border: thin white line at 20%
+        opacity drawn as 8 line segments so the diagonal cuts are crisp.
+        """
+        c = min(chamfer, w / 2.0, h / 2.0)
+        # Fill: central rectangle + 4 edge rectangles (avoids polygon API).
+        rl.draw_rectangle(int(x + c), int(y), int(w - 2 * c), int(h), rl_color(PREMIUM_CARD_FILL))
+        rl.draw_rectangle(int(x), int(y + c), int(w), int(h - 2 * c), rl_color(PREMIUM_CARD_FILL))
+        # Border: 8 segments forming the chamfered outline.
+        pts = [
+            (x + c, y), (x + w - c, y),
+            (x + w, y + c), (x + w, y + h - c),
+            (x + w - c, y + h), (x + c, y + h),
+            (x, y + h - c), (x, y + c),
+        ]
+        border = rl_color(PREMIUM_CARD_BORDER)
+        for i in range(len(pts)):
+            x0, y0 = pts[i]
+            x1, y1 = pts[(i + 1) % len(pts)]
+            rl.draw_line_ex(rl.Vector2(x0, y0), rl.Vector2(x1, y1), 1.0, border)
+
+    def _draw_premium_top_bar(self) -> None:
+        """Top bar: hamburger icon (left), date (center), time (right)."""
+        import datetime
+
+        now_dt = datetime.datetime.now()
+        weekdays = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
+        date_text = f"{now_dt.month}월 {now_dt.day}일 {weekdays[now_dt.weekday()]}"
+        hour = now_dt.hour
+        ampm = "AM" if hour < 12 else "PM"
+        hour12 = hour % 12 or 12
+        time_text = f"{hour12}:{now_dt.minute:02d} {ampm}"
+        bar_y = PREMIUM_TOP_BAR_H / 2.0
+        # Hamburger: three horizontal lines.
+        hx = 28.0
+        for i in range(3):
+            ly = bar_y - 8.0 + i * 8.0
+            rl.draw_line_ex(
+                rl.Vector2(hx, ly), rl.Vector2(hx + 22.0, ly), 2.0, rl_color(WHITE, 220)
+            )
+        self._draw_text(date_text, DESIGN_WIDTH / 2.0, bar_y,
+                        PREMIUM_TOP_BAR_DATE_SIZE, WHITE, anchor="center")
+        self._draw_text(time_text, DESIGN_WIDTH - 28.0, bar_y,
+                        PREMIUM_TOP_BAR_TIME_SIZE, WHITE, anchor="right")
+
+    def _draw_premium_speed(self, state: ClusterUiState) -> None:
+        """Large thin speed number + SET pill + gear circle + gap dots."""
+        display_speed_kph = state.display_speed_kph if state.display_speed_kph is not None else state.speed_kph
+        speed_value = int(round(display_speed(clamp(display_speed_kph, 0.0, MAX_SPEED_KPH), self.is_metric)))
+        speed_text = str(speed_value)
+        x = PREMIUM_SPEED_PANEL_X
+        y = PREMIUM_SPEED_PANEL_Y
+        # Large thin speed number (raylib has no font weights; the thin look
+        # comes from the large size + light color on black).
+        self._draw_text(speed_text, x, y, PREMIUM_SPEED_FONT_SIZE, WHITE, anchor="left")
+        speed_w = self._measure_text(speed_text, PREMIUM_SPEED_FONT_SIZE)[0]
+        unit = "km/h" if self.is_metric else "mph"
+        self._draw_text(unit, x + speed_w + 12.0, y + 30.0, 28.0, PREMIUM_GOLD, anchor="left")
+        # SET pill badge below the speed.
+        cruise_text = self._cruise_set_speed_text(state)
+        pill_y = y + 90.0
+        pill_text = f"SET {cruise_text}"
+        pill_w = self._measure_text(pill_text, 22.0)[0] + 28.0
+        pill_h = 30.0
+        rl.draw_rectangle_rounded(
+            rl.Rectangle(x, pill_y, pill_w, pill_h), 0.5, 8,
+            rl_color(PREMIUM_GOLD, 40),
+        )
+        self._draw_text(pill_text, x + pill_w / 2.0, pill_y + pill_h / 2.0,
+                        22.0, PREMIUM_CHAMPAGNE, anchor="center")
+        # Gear circle badge to the right of the SET pill.
+        gear = (state.gear_text or "").strip().upper()[:1] or "D"
+        gear_cx = x + pill_w + 32.0
+        gear_cy = pill_y + pill_h / 2.0
+        rl.draw_circle_lines(int(gear_cx), int(gear_cy), 16, rl_color(PREMIUM_GOLD, 200))
+        self._draw_text(gear, gear_cx, gear_cy, 22.0, WHITE, anchor="center")
+        # Gap dots: 4 dots, filled up to the current gap level.
+        gap_count = 0 if state.cruise_gap is None else int(clamp(float(state.cruise_gap), 1.0, 4.0))
+        dot_y = pill_y + pill_h + 22.0
+        for i in range(4):
+            dot_x = x + 10.0 + i * 22.0
+            filled = i < gap_count
+            if filled:
+                rl.draw_circle(int(dot_x), int(dot_y), 5.0, rl_color(PREMIUM_GOLD, 230))
+            else:
+                rl.draw_circle_lines(int(dot_x), int(dot_y), 5.0, rl_color(WHITE, 80))
+
+    def _draw_premium_hud(
+        self,
+        state: ClusterUiState,
+        left_signal_lit: bool,
+        right_signal_lit: bool,
+    ) -> None:
+        """Premium HUD: particle wave + top bar + gold speed + chamfered cards.
+
+        The 3D world is rendered underneath by render(); this draws the
+        premium 2D overlay on top. The info panel reuses the default
+        navigation/trip content inside chamfered cards.
+        """
+        now = time.monotonic()
+        self._draw_premium_particle_wave(now)
+        self._draw_premium_top_bar()
+        self._draw_premium_speed(state)
+        # Info panel as a chamfered card with navigation content.
+        # Uses _information_panel_x so panel-layout swap (driving right)
+        # moves the card to the left side like the default mode.
+        panel_x = self._information_panel_x(NAVI_LIVE_PANEL_X)
+        panel_y = PREMIUM_TOP_BAR_H + 8.0
+        panel_w = NAVI_LIVE_PANEL_W
+        panel_h = DESIGN_HEIGHT - panel_y - 8.0
+        self._draw_premium_chamfered_card(panel_x, panel_y, panel_w, panel_h)
+        # Turn signals: soft gold chevrons at the top corners.
+        if left_signal_lit:
+            self._draw_text("◀", 80.0, PREMIUM_TOP_BAR_H / 2.0 + 4.0,
+                            26.0, PREMIUM_GOLD, anchor="center")
+        if right_signal_lit:
+            self._draw_text("▶", DESIGN_WIDTH - 180.0, PREMIUM_TOP_BAR_H / 2.0 + 4.0,
+                            26.0, PREMIUM_GOLD, anchor="center")
 
     def _draw_driving_hud_content(
         self,

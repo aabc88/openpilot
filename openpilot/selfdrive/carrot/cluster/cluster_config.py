@@ -83,6 +83,7 @@ CLUSTER_SCREEN_MODE_DEBUG_GRAPH_RIGHT = 4
 CLUSTER_SCREEN_MODE_TRIP_REPORT = 5
 CLUSTER_SCREEN_MODE_NAVI = 6
 CLUSTER_SCREEN_MODE_NAV_MODEL = 7
+CLUSTER_SCREEN_MODE_PREMIUM = 8
 CLUSTER_SCREEN_MODE_PARAM = "ClusterHudScreenMode"
 CLUSTER_RADAR_INFO_NONE = 0
 CLUSTER_RADAR_INFO_VEHICLE_SPEED = 1
@@ -167,6 +168,45 @@ DARK_CLUSTER_THEME = ClusterTheme(
     primary_vehicle=(92, 112, 134),
     model_vehicle=(108, 122, 138),
     default_vehicle=(84, 96, 110),
+)
+
+# Premium theme (Kia ccNC style): pure black background, gold accents.
+# Used only by CLUSTER_SCREEN_MODE_PREMIUM. The particle wave and chamfered
+# cards are drawn by the renderer; this theme supplies the base colors.
+PREMIUM_GOLD = (212, 169, 92)
+PREMIUM_CHAMPAGNE = (232, 200, 122)
+
+PREMIUM_CLUSTER_THEME = ClusterTheme(
+    name="premium",
+    is_dark=True,
+    bg=(0, 0, 0),
+    panel_bg=(0, 0, 0),
+    text=(255, 255, 255),
+    muted=(139, 149, 165),
+    faint=(90, 101, 115),
+    road=(24, 28, 34),
+    road_edge=(150, 138, 110),
+    lane_marking_border=(212, 169, 92, 205),
+    road_edge_backing=(20, 18, 12, 196),
+    path_shadow=(0, 0, 0, 110),
+    path_uncertainty=(212, 169, 92, 82),
+    path_body=(212, 169, 92, 230),
+    path_highlight=(232, 200, 122, 245),
+    world_label_shadow=(0, 0, 0),
+    world_label_text=(255, 255, 255),
+    clock_bg=(0, 0, 0, 172),
+    clock_outline=(212, 169, 92, 72),
+    clock_text=(255, 255, 255),
+    gauge_bg=(12, 12, 10),
+    gauge_midline=(139, 149, 165),
+    inactive_signal_fill=(74, 70, 58, 92),
+    inactive_signal_outline=(120, 110, 88),
+    route_panel_bg=(8, 8, 6),
+    route_video_bg=(5, 5, 4),
+    route_video_status=(200, 190, 170),
+    primary_vehicle=(150, 138, 110),
+    model_vehicle=(130, 120, 100),
+    default_vehicle=(110, 102, 88),
 )
 
 
@@ -394,6 +434,7 @@ def normalize_cluster_screen_mode(value: object) -> int:
             "navi": CLUSTER_SCREEN_MODE_NAVI,
             "navigation": CLUSTER_SCREEN_MODE_NAVI,
             "nav-model": CLUSTER_SCREEN_MODE_NAV_MODEL,
+            "premium": CLUSTER_SCREEN_MODE_PREMIUM,
         }
         if normalized in aliases:
             return aliases[normalized]
@@ -415,6 +456,7 @@ def normalize_cluster_screen_mode(value: object) -> int:
         CLUSTER_SCREEN_MODE_TRIP_REPORT,
         CLUSTER_SCREEN_MODE_NAVI,
         CLUSTER_SCREEN_MODE_NAV_MODEL,
+        CLUSTER_SCREEN_MODE_PREMIUM,
     ):
         return mode
     return CLUSTER_SCREEN_MODE_DEFAULT
