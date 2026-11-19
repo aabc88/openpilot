@@ -686,7 +686,9 @@ class RobotFaceView(Widget):
       pass
 
     # 인게이지 HUD (핸들·현재 속도·목표 속도·차간거리)
-    if state == FaceState.ENGAGED:
+    # 표정 상태와 무관하게 인게이지 중이면 항상 표시 — 깜빡이·클램프·급제동
+    # 등 다른 표정이 떠도 속도·크루즈·차간 정보가 계속 보인다.
+    if sig.engaged:
       try:
         self._draw_hud(rect, sig, hud_scale)
       except Exception:
