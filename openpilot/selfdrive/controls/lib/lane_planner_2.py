@@ -125,7 +125,7 @@ class LanePlanner:
       self.l_lane_change_prob = desire_state[log.Desire.laneChangeLeft]
       self.r_lane_change_prob = desire_state[log.Desire.laneChangeRight]
 
-  def get_d_path(self, CS, v_ego, path_t, path_xyz, curve_speed):
+  def get_d_path(self, CS, v_ego, path_t, path_xyz, curve_speed, *, avoidance=None):
     #if v_ego > 0.1:
     #  self.lane_width_updated_count = max(0, self.lane_width_updated_count - 1)
     # Reduce reliance on lanelines that are too far apart or
@@ -259,14 +259,18 @@ class LanePlanner:
     if self.lanefull_mode and self.d_prob_count > int(1 / DT_MDL):
       laneline_active = True
       use_dist_mode = False  ## 아무리생각해봐도.. 같은 방법인듯...
+      lane_path_y_interp = None
       if use_dist_mode:
         lane_path_y_interp = np.interp(path_xyz[:,0] + v_ego * adjustLaneTime, self.ll_x, lane_path_y)
-        path_xyz[:,1] = self.d_prob * lane_path_y_interp + (1.0 - self.d_prob) * path_xyz[:,1]
       else:
         safe_idxs = np.isfinite(self.ll_t)
         if safe_idxs[0]:
           lane_path_y_interp = np.interp(path_t * (1.0 + adjustLaneTime), self.ll_t[safe_idxs], lane_path_y[safe_idxs])
-          path_xyz[:,1] = self.d_prob * lane_path_y_interp + (1.0 - self.d_prob) * path_xyz[:,1]
+      if lane_path_y_interp is not None:
+        weight = self.d_prob
+        if avoidance is not None:
+          weight = avoidance.lane_weight(path_xyz[:, 0], path_xyz[:, 1], lane_path_y_interp, weight)
+        path_xyz[:, 1] = weight * lane_path_y_interp + (1.0 - weight) * path_xyz[:, 1]
 
 
     path_xyz[:, 1] += (CAMERA_OFFSET + self.lane_offset_filtered.x)

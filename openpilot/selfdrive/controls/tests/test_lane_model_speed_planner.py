@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from openpilot.selfdrive.controls.lib.lane_avoidance import LaneAvoidance
 from openpilot.selfdrive.controls.lib.lane_model_speed import LaneModelSpeedGuard
 from opendbc.car.lateral_geometry import LateralGeometry
 
@@ -32,8 +33,13 @@ class StubLanePlanner:
   def parse_model(self, md):
     pass
 
-  def get_d_path(self, cs, speed, t, path, curve_speed):
+  def get_d_path(self, cs, speed, t, path, curve_speed, *, avoidance=None):
+    self.avoidance = avoidance
     return path, self.lanefull_mode
+
+  def apply_min_distance_clamp(self, path, speed):
+    self.clamped_path = path.copy()
+    return path
 
 
 def make_planner(cp=None):
@@ -121,3 +127,26 @@ def test_missing_model_speed_cannot_reuse_lane_mode_eligibility():
   for _ in range(20):
     assert not update(planner, inputs())
   assert update(planner, inputs())
+
+
+def test_shadow_preserves_path_and_active_mode_keeps_boundary_clamp():
+  planner = make_planner()
+  carrot = SimpleNamespace(atc_active=False)
+  sm = inputs()
+  for _ in range(21):
+    planner.update(sm, carrot)
+  baseline = planner.path_xyz.copy()
+  candidate = LaneAvoidance("tracked", side=1, strength=1.0, start=5.0, end=25.0)
+
+  planner.update(sm, carrot, candidate)
+  assert planner.lanelines_active
+  assert planner.avoidance is candidate
+  assert not planner.apply_avoidance
+  assert planner.LP.avoidance is None
+  np.testing.assert_array_equal(planner.path_xyz, baseline)
+
+  planner.LP.clamped_path = None
+  planner.update(sm, carrot, candidate, apply_avoidance=True)
+  assert planner.lanelines_active
+  assert planner.LP.avoidance is candidate
+  np.testing.assert_array_equal(planner.LP.clamped_path, planner.path_xyz)

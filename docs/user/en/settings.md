@@ -117,7 +117,7 @@ Ignoring `x0.01`, `x0.001`, `cm`, `km/h`, or `%` can make a value appear one hun
 
 ## Settings map
 
-The current `carrot_settings.json` contains **217 parameters**. The driver-monitoring exception and `NNFF` are search only; the remaining entries appear in these menus:
+The current `carrot_settings.json` contains **233 parameters**. The driver-monitoring exception and `NNFF` appear in search. The remaining entries appear in these menus.
 
 | Category | Count | Groups |
 |---|---:|---|
@@ -125,6 +125,7 @@ The current `carrot_settings.json` contains **217 parameters**. The driver-monit
 | Vehicle and hardware | 32 | Hyundai/Kia, CAN FD/HDA, radar, driver monitoring, vehicle assistance, device hardware |
 | Display | 34 | Information, path, brightness/on-road view, external HUD |
 | System | 9 | Recording/power, network/map, sound, software |
+| ej | 16 | Min-distance clamp, lane centering, lateral acceleration limits, braking, UI |
 
 ## Driving control
 
@@ -440,6 +441,10 @@ Check storage use for recording and network use, heat, and privacy before enabli
 `SoundVolumeAdjust` changes general sound volume. DM's first audible warning has a 70% minimum output gain; its final warning always uses 100%, regardless of volume settings or ambient-noise attenuation. The preceding visual-only notice remains silent. See [driver monitoring](driver-monitoring.md) for details.
 
 Experimental DM switches to standard monitoring for 20 seconds only when moving traffic first appears after an absence. Additional vehicles do not extend it; experimental monitoring then resumes, with no empty-road bonus while traffic remains.
+
+## ej lane centering
+
+**Settings → ej → Lane centering → Lane correction during obstacle avoidance** (`LaneAvoidanceMode`) supports the K8 Hybrid (`KIA_K8_HEV_1ST_GEN`). Mode `0` is Off, mode `1` records avoidance candidates in the drive log and is the default, and mode `2` is Apply (experimental). Mode `2` reduces lane-centering corrections when front and corner radar corroborate a stopped or slow-moving vehicle near the lane edge and the existing model path has room to pass it within the same lane. Use mode `2` only in a controlled test environment. The driver remains responsible for avoiding obstacles and controlling the vehicle.
 
 <a id="always-on-changes"></a>
 ## Always-on changes (no setting)

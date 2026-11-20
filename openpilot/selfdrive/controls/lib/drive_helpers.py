@@ -535,9 +535,14 @@ class LaneCenterCorrector:
       gain = LANE_CENTER_GAIN_DEFAULT
     return bool(enabled), threshold, gain
 
-  def update(self, md, v_ego, lane_changing):
+  def update(self, md, v_ego, lane_changing, *, avoidance=None):
     """모델 곡률에 더할 곡률 보정(1/m)을 계산한다. 양수 = 우회전."""
     kappa = self._update_impl(md, v_ego, lane_changing)
+    if avoidance is not None and kappa * avoidance.side > 0.0:
+      lookahead = float(np.clip(v_ego * LANE_CENTER_LOOKAHEAD_TIME,
+                                LANE_CENTER_LOOKAHEAD_MIN, LANE_CENTER_LOOKAHEAD_MAX))
+      approach = min(1.0, max(0.0, (lookahead - avoidance.approachStart) / 5.0))
+      kappa *= 1.0 - approach * avoidance.strength
     kappa = self._slew_limit(kappa)
     self.last_correction = kappa
     return kappa
