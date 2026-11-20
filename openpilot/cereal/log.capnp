@@ -1383,7 +1383,7 @@ struct LateralPlan @0xe1e9318e2ae8b51e {
     status @0 :Text;
     side @1 :Int8;  # Model coordinates: negative is left, positive is right.
     strength @2 :Float32;
-    applyEnabled @3 :Bool;
+    applyEnabled @3 :Bool;  # Allows attenuation of the laneless LaneCenter correction.
     approachStart @4 :Float32;  # Distance in meters before the spatial fade begins.
   }
 

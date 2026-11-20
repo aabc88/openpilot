@@ -199,11 +199,6 @@ class Controls:
 
     # Steering PID loop and lateral MPC
     lat_plan = self.sm['lateralPlan']
-    lane_avoidance = lat_plan.laneAvoidance
-    avoidance_current = (lane_avoidance.applyEnabled and self.sm.valid['lateralPlan']
-                         and not (CS.steeringPressed or CS.brakePressed or CS.gasPressed)
-                         and 0 <= time.monotonic() - self.sm.logMonoTime['lateralPlan'] * 1e-9 <= 0.20
-                         and abs(self.sm.logMonoTime['modelV2'] - lat_plan.modelMonoTime) <= 150_000_000)
     curve_speed_abs = abs(self.sm['carrotMan'].vTurnSpeed)
     self.lanefull_mode_enabled = (lat_plan.useLaneLines and curve_speed_abs > self.params.get_int("UseLaneLineCurveSpeed"))
     if CC.latActive and len(lat_plan.curvatures) > 0 and (lat_plan.useLaneLines if self.is_vw_meb else self.lanefull_mode_enabled):
@@ -229,8 +224,7 @@ class Controls:
       else:
         new_desired_curvature = float(model_v2.action.desiredCurvature)  # raw 모델곡률 (if2 기본과 동일)
     elif self.lanefull_mode_enabled:
-      if len(lat_plan.curvatures) == 0 or (lane_avoidance.applyEnabled and
-                                           not (avoidance_current and lat_plan.mpcSolutionValid)):
+      if len(lat_plan.curvatures) == 0:
         new_desired_curvature = self.curvature
       else:
         curvature = get_lag_adjusted_curvature(self.CP, CS.vEgo, lat_plan.psis, lat_plan.curvatures, steer_actuator_delay + lat_smooth_seconds, lat_plan.distances)
@@ -250,7 +244,11 @@ class Controls:
                        or getattr(self.sm['carrotMan'], 'atc_active', False))
       clamp_kappa = self.clamp_steer_corrector.update(model_v2, CS.vEgo, lane_changing)
       avoidance = None
-      if (avoidance_current and not lane_changing
+      lane_avoidance = lat_plan.laneAvoidance
+      if (lane_avoidance.applyEnabled and self.sm.valid['lateralPlan'] and not lane_changing
+          and not (CS.steeringPressed or CS.brakePressed or CS.gasPressed)
+          and 0 <= time.monotonic() - self.sm.logMonoTime['lateralPlan'] * 1e-9 <= 0.20
+          and abs(self.sm.logMonoTime['modelV2'] - lat_plan.modelMonoTime) <= 150_000_000
           and lane_avoidance.side in (-1, 1) and 0.0 < lane_avoidance.strength <= 1.0
           and math.isfinite(lane_avoidance.approachStart)):
         avoidance = lane_avoidance

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from openpilot.selfdrive.controls.lib.lane_avoidance import LaneAvoidance, LaneAvoidanceGuard
+from openpilot.selfdrive.controls.lib.lane_avoidance import LaneAvoidanceGuard
 
 
 EGO_SPEED = 12.0
@@ -147,54 +147,6 @@ def test_rejects_unreliable_geometry_or_paths_outside_vehicle_envelope(scenario)
   elif scenario == 'short':
     md.position.x *= 0.15
   assert all(r.strength == 0.0 for r in drive(guard, md))
-
-
-@pytest.mark.parametrize('side', [-1, 1])
-def test_mix_reduces_only_toward_obstacle_inside_ramped_window(side):
-  result = LaneAvoidance('tracked', side, 0.5, 10.0, 30.0)
-  x = np.array([0.0, 12.5, 15.0, 20.0, 27.5, 35.0])
-  lane_y = side * np.array([1.0, 1.0, 1.0, -1.0, 1.0, 1.0])
-  expected = [0.8, 0.6, 0.4, 0.8, 0.6, 0.8]
-  np.testing.assert_allclose(result.lane_weight(x, np.zeros_like(x), lane_y, 0.8), expected)
-
-
-def test_production_lane_blend_still_runs_boundary_clamp():
-  class TestFilter:
-    def __init__(self, x, *_):
-      self.x = x
-
-    def update(self, x):
-      self.x = x
-
-  source = Path(__file__).parents[1] / 'lib/lane_planner_2.py'
-  tree = ast.parse(source.read_text(encoding='utf8'))
-  tree.body = [node for node in tree.body if not isinstance(node, (ast.Import, ast.ImportFrom))]
-  namespace = {
-    'np': np, 'DT_MDL': STEP, 'FirstOrderFilter': TestFilter,
-    'Params': lambda: SimpleNamespace(get_int=lambda *_: 0, get_float=lambda *_: 0.0,
-                                     get=lambda *args, **kwargs: None),
-  }
-  exec(compile(tree, str(source), 'exec'), namespace)
-  planner = namespace['LanePlanner']()
-  planner.ll_t = X / EGO_SPEED
-  planner.ll_x = X
-  planner.lll_y, planner.rll_y = line(-1.9).y, line(1.9).y
-  planner.lll_prob = planner.rll_prob = 0.99
-  planner.lll_std = planner.rll_std = 0.10
-  planner.lanefull_mode = True
-  planner.d_prob_count = 21
-  path = np.column_stack([X, line(-0.70).y, np.zeros_like(X)])
-  candidate = LaneAvoidance("tracked", side=1, strength=1.0, start=10.0, end=30.0)
-
-  baseline, old_mode = planner.get_d_path(None, EGO_SPEED, planner.ll_t, path.copy(), 100.0)
-  blended, new_mode = planner.get_d_path(None, EGO_SPEED, planner.ll_t, path.copy(), 100.0, avoidance=candidate)
-  assert old_mode and new_mode
-  np.testing.assert_allclose(baseline[:, 1], 0.0)
-  assert blended[8, 1] == pytest.approx(-0.70)
-  np.testing.assert_array_equal(blended[X >= 30.0], baseline[X >= 30.0])
-  clamped = planner.apply_min_distance_clamp(blended, EGO_SPEED)
-  assert clamped[8, 1] == pytest.approx(-0.55)
-  assert planner.clamp_max_correction == pytest.approx(0.15)
 
 
 def test_uncertain_edge_requires_room_for_its_inward_uncertainty_margin():

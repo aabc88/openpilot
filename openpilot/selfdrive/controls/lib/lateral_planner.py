@@ -77,8 +77,6 @@ class LateralPlanner:
     self.curve_speed = 0
     self.lane_model_speed_guard = LaneModelSpeedGuard(recovery_frames=int(1 / DT_MDL))
     self.laneless_only = True
-    self.avoidance = None
-    self.apply_avoidance = False
 
   def reset_mpc(self, x0=None):
     if x0 is None:
@@ -86,7 +84,7 @@ class LateralPlanner:
     self.x0 = x0
     self.lat_mpc.reset(x0=self.x0)
 
-  def update(self, sm, carrot, avoidance=None, *, apply_avoidance=False):
+  def update(self, sm, carrot):
     global LATERAL_ACCEL_COST, LATERAL_JERK_COST, STEERING_RATE_COST
     if self.geometry.update(getattr(sm['liveParameters'], 'centerToFrontRatio', 0.0)):
       self.factor1 = self.geometry.wheelbase - self.geometry.center_to_front
@@ -154,12 +152,7 @@ class LateralPlanner:
     self.LP.lane_width_left = md.meta.laneWidthLeft
     self.LP.lane_width_right = md.meta.laneWidthRight
     self.LP.curvature = measured_curvature
-    self.avoidance = avoidance
-    self.apply_avoidance = apply_avoidance and model_active and avoidance is not None and avoidance.strength > 0.0
-    self.path_xyz, self.lanelines_active = self.LP.get_d_path(
-      sm['carState'], v_ego_car, self.t_idxs, self.path_xyz, self.curve_speed,
-      avoidance=avoidance if self.apply_avoidance else None,
-    )
+    self.path_xyz, self.lanelines_active = self.LP.get_d_path(sm['carState'], v_ego_car, self.t_idxs, self.path_xyz, self.curve_speed)
 
     self.latDebugText = self.LP.debugText
     #self.lanelines_active = True if self.LP.d_prob > 0.3 and self.LP.lanefull_mode else False
@@ -220,7 +213,7 @@ class LateralPlanner:
   
     self.x_sol = self.lat_mpc.x_sol
 
-  def publish(self, sm, pm, carrot):
+  def publish(self, sm, pm, carrot, avoidance=None, *, apply_avoidance=False):
     plan_solution_valid = self.solution_invalid_cnt < 2
     plan_send = messaging.new_message('lateralPlan')
     plan_send.valid = sm.all_checks(service_list=['carState', 'controlsState', 'modelV2'])
@@ -262,13 +255,13 @@ class LateralPlanner:
     lateralPlan.laneChangeState = sm['modelV2'].meta.laneChangeState
     lateralPlan.laneChangeDirection = sm['modelV2'].meta.laneChangeDirection
     lateralPlan.laneWidth = float(self.LP.lane_width)
-    if self.avoidance is not None:
+    if avoidance is not None:
       diagnostic = lateralPlan.laneAvoidance
-      diagnostic.status = self.avoidance.status
-      diagnostic.side = self.avoidance.side
-      diagnostic.strength = self.avoidance.strength
-      diagnostic.applyEnabled = self.apply_avoidance
-      diagnostic.approachStart = self.avoidance.start
+      diagnostic.status = avoidance.status
+      diagnostic.side = avoidance.side
+      diagnostic.strength = avoidance.strength
+      diagnostic.applyEnabled = apply_avoidance and avoidance.strength > 0.0
+      diagnostic.approachStart = avoidance.start
 
     #plan_send.lateralPlan.dPathWLinesX = [float(x) for x in self.d_path_w_lines_xyz[:, 0]]
     #plan_send.lateralPlan.dPathWLinesY = [float(y) for y in self.d_path_w_lines_xyz[:, 1]]

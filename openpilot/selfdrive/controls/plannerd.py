@@ -178,8 +178,8 @@ def main():
         else:
           lane_avoidance.reset()
       apply_avoidance = avoidance_mode == 2 and bool(params.get("ClampEnable", return_default=True))
-      lateral_planner.update(sm, carrot, avoidance, apply_avoidance=apply_avoidance)
-      lateral_planner.publish(sm, pm, carrot)
+      lateral_planner.update(sm, carrot)
+      lateral_planner.publish(sm, pm, carrot, avoidance, apply_avoidance=apply_avoidance)
 
       ldw.update(model_frame, sm['modelV2'], sm['carState'], sm['carControl'])
       msg = messaging.new_message('driverAssistance')

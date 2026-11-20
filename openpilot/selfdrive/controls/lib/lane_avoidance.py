@@ -24,15 +24,6 @@ class LaneAvoidance:
   side: int = 0  # obstacle side in model coordinates (right is positive)
   strength: float = 0.0
   start: float = 0.0
-  end: float = 0.0
-
-  def lane_weight(self, x, model_y, lane_y, weight):
-    if self.strength == 0.0:
-      return weight
-    # Ramp in and out spatially and only remove motion toward the obstacle.
-    window = np.clip(np.minimum((x - self.start) / 5.0, (self.end - x) / 5.0), 0.0, 1.0)
-    toward = (lane_y - model_y) * self.side > 0.0
-    return weight * (1.0 - self.strength * window * toward)
 
 
 @dataclass(frozen=True)
@@ -229,7 +220,5 @@ class LaneAvoidanceGuard:
       strength = min(1.0, strength + elapsed / 0.35)
     elif status == "releasing":
       strength = max(0.0, strength - elapsed / 0.75)
-    self.result = LaneAvoidance(status, side, strength, obstacle.distance - 12.0,
-                                max(5.0 if status == "releasing" else 0.0,
-                                    obstacle.distance + OBJECT_LENGTH + EGO_LENGTH + 5.0))
+    self.result = LaneAvoidance(status, side, strength, obstacle.distance - 12.0)
     return self.result
