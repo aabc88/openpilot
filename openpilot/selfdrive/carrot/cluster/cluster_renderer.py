@@ -123,7 +123,11 @@ KAIGEN_GOTHIC_KR_BOLD_FONT_PATH = OPENPILOT_FONT_DIR / "KaiGenGothicKR-Bold.ttf"
 JETBRAINS_MONO_FONT_PATH = OPENPILOT_FONT_DIR / "JetBrainsMono-Medium.ttf"
 VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "cybertruck" / "cybertruck_cluster.obj"
 PARK_VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "ev6" / "ev6_cluster.obj"
-K8_VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "k8" / "k8_cluster.obj"
+K8_ASSET_DIR = CLUSTER_DIR / "assets" / "models" / "k8"
+K8_VEHICLE_MODEL_PATH = K8_ASSET_DIR / "k8_cluster.obj"
+K8_PARK_CAR_IMAGE = Path("/data/k8_park_car.png")
+# Cropped car bounds from the reverse camera at DESIGN_WIDTH × DESIGN_HEIGHT.
+K8_REVERSE_CAR_RECT = (455.5, 132.5, 428.0, 179.5)
 OTHER_VEHICLE_MODELS_DIR = CLUSTER_DIR / "assets" / "models" / "others"
 OTHER_VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "generic" / "generic_car_cluster.obj"
 TPMS_CAR_ICON_PATH = CLUSTER_DIR / "assets" / "images" / "tpms_toy_car.png"
@@ -1301,6 +1305,8 @@ class ClusterUiRenderer:
         self._park_model_key = None
         self._ev6_reverse_sprite = None
         self._ev6_reverse_sprite_key = None
+        self._k8_park_png_missing = False
+        self._k8_reverse_png_missing = False
         self._ev6_park_textures = None
         self._ev6_park_retry_t = 0.0
         self._cutin_hold: list[float] | None = None  # EV6 HUD patch v6: [colour until, x, long_m, model idx, model until]
@@ -1960,6 +1966,8 @@ class ClusterUiRenderer:
             textures.append(self._ev6_reverse_sprite[0])
         self._ev6_reverse_sprite = None
         self._ev6_reverse_sprite_key = None
+        self._k8_park_png_missing = False
+        self._k8_reverse_png_missing = False
         # Detach handles first: close is idempotent, including after an interrupted unload.
         self._ev6_park_textures = None
         self._ev6_park_retry_t = 0.0
@@ -1974,6 +1982,68 @@ class ClusterUiRenderer:
                 failure = failure or exc
         if failure is not None:
             raise failure
+
+    @staticmethod
+    def _load_k8_gear_texture(path: Path, *, crop: bool = False):
+        if not path.is_file():
+            return None
+        image = texture = None
+        try:
+            image = rl.load_image(str(path))
+            if not rl.is_image_valid(image) or (crop and not ClusterUiRenderer._crop_car_image(image)):
+                return None
+            texture = rl.load_texture_from_image(image)
+            if texture.id <= 0:
+                return None
+            rl.gen_texture_mipmaps(texture)
+            rl.set_texture_filter(texture, rl.TextureFilter.TEXTURE_FILTER_TRILINEAR)
+            result, texture = texture, None
+            return result
+        except Exception as exc:
+            print(f"K8 car PNG load failed ({path}): {exc}", flush=True)
+            return None
+        finally:
+            if texture is not None and texture.id > 0:
+                rl.unload_texture(texture)
+            if image is not None and rl.is_image_valid(image):
+                rl.unload_image(image)
+
+    def _prepare_k8_park_image(self) -> bool:
+        if self._park_model_key == "k8-png":
+            return True
+        if self._k8_park_png_missing:
+            return False
+        texture = self._load_k8_gear_texture(K8_PARK_CAR_IMAGE, crop=True)
+        if texture is None:
+            texture = self._load_k8_gear_texture(K8_ASSET_DIR / "k8_park.png")
+        if texture is None:
+            self._k8_park_png_missing = True
+            return False
+        if self._park_model_texture is not None:
+            rl.unload_texture(self._park_model_texture)
+        self._park_model_texture, self._park_model_key = texture, "k8-png"
+        return True
+
+    def _prepare_k8_reverse_image(self) -> bool:
+        key = ("k8-png", self.width, self.height)
+        if self._ev6_reverse_sprite_key == key:
+            return True
+        if self._k8_reverse_png_missing:
+            return False
+        texture = self._load_k8_gear_texture(K8_ASSET_DIR / "k8_reverse.png")
+        if texture is None:
+            self._k8_reverse_png_missing = True
+            return False
+
+        # The reverse camera's vertical field of view is fixed and its projection is centered.
+        x, y, width, height = K8_REVERSE_CAR_RECT
+        scale = self.height / DESIGN_HEIGHT
+        rect = (self.width / 2 + (x - DESIGN_WIDTH / 2) * scale, y * scale, width * scale, height * scale)
+        if self._ev6_reverse_sprite:
+            rl.unload_texture(self._ev6_reverse_sprite[0])
+        self._ev6_reverse_sprite = (texture, rect)
+        self._ev6_reverse_sprite_key = key
+        return True
 
     def _prepare_park_model_texture(self, state: ClusterUiState) -> None:
         """Cache the selected car before binding the main frame's render target."""
@@ -2227,10 +2297,14 @@ class ClusterUiRenderer:
                                 rl.Color(0, 0, 0, 8 if theme.is_dark else 7))
             texture = self._park_model_texture
             name = ego_model_name(state.car_fingerprint)
-            if name == "ev6" or (name == "k8" and self._k8_vehicle_model is None):
+            k8_png = name == "k8" and self._park_model_key == "k8-png"
+            if name == "ev6" or (name == "k8" and not k8_png and self._k8_vehicle_model is None):
                 texture = self._ev6_park_car_texture(theme.is_dark) or texture
             if texture is not None:
                 car_w = car_h * texture.width / max(1, texture.height)
+                if k8_png and car_w > 700.0:
+                    car_h *= 700.0 / car_w
+                    car_w = 700.0
                 rl.draw_texture_pro(texture, rl.Rectangle(0, 0, texture.width, texture.height),
                                     rl.Rectangle(car_cx - car_w / 2, car_bottom - car_h, car_w, car_h),
                                     rl.Vector2(0, 0), 0.0, rl.WHITE)
@@ -2490,12 +2564,19 @@ class ClusterUiRenderer:
 
     def _prepare_trip_report_cache(self, state: ClusterUiState, now: float | None = None) -> None:
         """Prepare vehicle models and cached panels outside the active frame target."""
-        if ego_model_name(getattr(state, "car_fingerprint", "")) == "k8":
+        park = self._ev6_park_screen_active(state)
+        reverse = not park and self._ev6_reverse_screen_active(state)
+        k8 = ego_model_name(getattr(state, "car_fingerprint", "")) == "k8"
+        k8_png = k8 and ((park and self._prepare_k8_park_image()) or (reverse and self._prepare_k8_reverse_image()))
+        if k8 and not k8_png:
             self._load_k8_vehicle_model()
-        if self._ev6_park_screen_active(state) or self._ev6_reverse_screen_active(state):
-            self._load_park_vehicle_models()
-            self._prepare_park_model_texture(state)
-            self._ev6_prepare_reverse_sprite(state)
+        if park or reverse:
+            if not k8_png:
+                self._load_park_vehicle_models()
+                if park:
+                    self._prepare_park_model_texture(state)
+                else:
+                    self._ev6_prepare_reverse_sprite(state)
             self._trip_report_cache_visible = False
             return
         if self._effective_screen_mode(state) != CLUSTER_SCREEN_MODE_TRIP_REPORT:
