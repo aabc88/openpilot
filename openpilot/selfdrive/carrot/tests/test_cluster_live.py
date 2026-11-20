@@ -19,6 +19,7 @@ from cluster_live import (
 )
 import cluster_live
 from cluster_models import ClusterAlert
+from cluster_scene import build_cluster_scene
 
 
 @pytest.mark.parametrize(
@@ -199,6 +200,60 @@ def test_live_cluster_uses_authoritative_recorded_cutin_without_recomputation() 
   parser._update_live_tracks(SimpleNamespace(points=()), 1.0)
 
   assert not parser.recompute_cutins
+
+
+@pytest.fixture
+def startup_cluster(monkeypatch):
+  class SubMaster(dict):
+    def update(self, _timeout_ms):
+      pass
+
+  source = object.__new__(OpenpilotLiveSource)
+  source.sm = SubMaster()
+  source.services = ("carParams",)
+  source.parser = live_route_parser()
+  source.timeout_ms = source.frames = 0
+  source.profile_enabled = source._current_car_params_loaded = False
+  source._standby_state = standby_state()
+  source._service_alive = lambda service: service in source.sm
+  source._service_updated = lambda service: service in source.sm
+  source._with_debug_state = source._with_live_hud_state = lambda state: state
+  source.params = {}
+  source.messaging = SimpleNamespace(log_from_bytes=lambda payload, _schema: payload)
+  monkeypatch.setitem(sys.modules, "openpilot.cereal", SimpleNamespace(car=SimpleNamespace(CarParams=object())))
+  return source, source.params
+
+
+def test_k8_model_is_selected_in_first_standby_frame(startup_cluster, monkeypatch) -> None:
+  source, params = startup_cluster
+  params["CarParamsPersistent"] = SimpleNamespace(carFingerprint="KIA_K8_HEV_1ST_GEN", wheelbase=4.25)
+  wheelbase = source.parser.wheelbase_m
+  source._load_cached_car_params()
+  monkeypatch.setattr("cluster_scene.clean_ui_enabled", lambda: False)
+
+  state = source.update()
+
+  assert build_cluster_scene(state).vehicles[0].model_name == "k8"
+  assert source.parser.wheelbase_m == wheelbase
+
+  # card wrote the new fingerprint before its first carState, but the HUD missed its IPC message.
+  params["CarParams"] = SimpleNamespace(carFingerprint="KIA_EV6", wheelbase=2.9)
+  source.sm["carState"] = SimpleNamespace(vEgo=0.0)
+  assert source.update().car_fingerprint == "KIA_EV6"
+  assert source.parser.wheelbase_m == 2.9
+
+
+def test_current_vehicle_identity_overrides_saved_and_standby_identity(startup_cluster) -> None:
+  source, params = startup_cluster
+  params["CarParamsPersistent"] = SimpleNamespace(carFingerprint="KIA_K8_HEV_1ST_GEN")
+  params["CarParams"] = SimpleNamespace(carFingerprint="KIA_EV6")
+  source._load_cached_car_params()
+  assert source.update().car_fingerprint == "KIA_EV6"
+
+  source.sm["carParams"] = SimpleNamespace(carFingerprint="HYUNDAI_IONIQ_5")
+  assert source.update().car_fingerprint == "HYUNDAI_IONIQ_5"
+  source.sm["carState"] = SimpleNamespace(vEgo=0.0)
+  assert source.update().car_fingerprint == "HYUNDAI_IONIQ_5"
 
 
 def test_live_onroad_state_is_unknown_until_device_state_is_alive() -> None:

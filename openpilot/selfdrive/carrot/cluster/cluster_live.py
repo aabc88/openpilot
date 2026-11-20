@@ -141,6 +141,7 @@ class OpenpilotLiveSource:
         self.last_state: ClusterUiState | None = None
         self.start_t = time.monotonic()
         self.frames = 0
+        self._current_car_params_loaded = False
         self.params: Any | None = None
         self.params_memory: Any | None = None
         self._energy_gauge_label = "fuel"
@@ -190,16 +191,29 @@ class OpenpilotLiveSource:
             pass
 
     def _load_cached_car_params(self) -> None:
+        self._apply_current_car_params(self._read_cached_car_params("CarParams"))
+        if not self._current_car_params_loaded:
+            # Only the display identity is usable from the previous drive.
+            cached = self._read_cached_car_params("CarParamsPersistent")
+            self.parser.car_fingerprint = str(safe_get(cached, "carFingerprint", "") or "")
+
+    def _read_cached_car_params(self, key: str) -> Any | None:
         if self.params is None:
-            return
+            return None
         try:
             from openpilot.cereal import car
 
-            car_params_bytes = self.params.get("CarParams")
+            car_params_bytes = self.params.get(key)
             if car_params_bytes:
-                self.parser._update_car_params(self.messaging.log_from_bytes(car_params_bytes, car.CarParams))
+                return self.messaging.log_from_bytes(car_params_bytes, car.CarParams)
         except Exception:
             pass
+        return None
+
+    def _apply_current_car_params(self, car_params: Any) -> None:
+        if safe_get(car_params, "carFingerprint", ""):
+            self.parser._update_car_params(car_params)
+            self._current_car_params_loaded = True
 
     def _load_cached_calibration(self) -> None:
         if self.params is None or self.log is None:
@@ -306,6 +320,9 @@ class OpenpilotLiveSource:
         if onroad_state is not None:
             self.parser.trip_report_tracker.set_onroad(onroad_state)
         if self._service_alive("carState"):
+            if self.frames == 0 and not self._current_car_params_loaded:
+                # card writes CarParams before sending carState. Its initial IPC message can be missed.
+                self._apply_current_car_params(self._read_cached_car_params("CarParams"))
             profile_stage = self._profile_start()
             event_t = self._service_time("carState")
             frame = self.parser._frame_from_car_state(self.sm["carState"], event_t)
@@ -320,6 +337,8 @@ class OpenpilotLiveSource:
             return self.last_state
 
         profile_stage = self._profile_start()
+        if self._standby_state.car_fingerprint != self.parser.car_fingerprint:
+            self._standby_state = replace(self._standby_state, car_fingerprint=self.parser.car_fingerprint)
         state = self._standby_state
         self._profile_add("source.live.standby_state", profile_stage)
 
@@ -634,7 +653,7 @@ class OpenpilotLiveSource:
         elif service == "livePose":
             self.parser._update_live_pose(data, event_t)
         elif service == "carParams":
-            self.parser._update_car_params(data)
+            self._apply_current_car_params(data)
         elif service == "radarState":
             self.parser._update_radar_state(data, event_t)
         elif service == "liveTracks":
