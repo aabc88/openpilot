@@ -125,6 +125,7 @@ VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "cybertruck" / "cybertr
 PARK_VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "ev6" / "ev6_cluster.obj"
 K8_ASSET_DIR = CLUSTER_DIR / "assets" / "models" / "k8"
 K8_VEHICLE_MODEL_PATH = K8_ASSET_DIR / "k8_cluster.obj"
+K8_PARK_MODEL_PATH = K8_ASSET_DIR / "k8_park.obj"
 # Cropped car bounds from the reverse camera at DESIGN_WIDTH × DESIGN_HEIGHT.
 K8_REVERSE_CAR_RECT = (455.5, 132.5, 428.0, 179.5)
 OTHER_VEHICLE_MODELS_DIR = CLUSTER_DIR / "assets" / "models" / "others"
@@ -2031,8 +2032,8 @@ class ClusterUiRenderer:
         if not self._ev6_park_screen_active(state):
             return
         name = ego_model_name(state.car_fingerprint)
-        model, key = self._ego_model(name)
-        if model is None or (name == "k8" and key != name) or key == self._park_model_key:
+        model, key = (None, "k8") if name == "k8" else self._ego_model(name)
+        if key == self._park_model_key or (model is None and name != "k8"):
             return
         now = time.monotonic()
         if now < getattr(self, "_park_model_retry_t", 0.0):
@@ -2042,16 +2043,20 @@ class ClusterUiRenderer:
             rl.unload_texture(self._park_model_texture)
             self._park_model_texture = None
         self._park_model_key = None
-        target = image = texture = None
+        target = image = texture = park_model = None
         try:
             if key == "k8":
-                # Match the front three-quarter view used to check the K8 body proportions.
-                position, target_height, fovy = (-5.8, 9.2, 1.95), 0.711, 26.0
-                render_size = (1600, 960)
+                # The painted materials are baked from this camera; a second lighting pass would darken them.
+                park_model = self._load_shaded_vehicle_model(K8_PARK_MODEL_PATH, attach_shading=False)
+                if park_model is None:
+                    return
+                model = park_model
+                position, look_at = (-5.806969, 9.133412, 1.309627), (-0.020934, 0.002721, 0.713550)
+                fovy, render_size = 21.0, (1600, 900)
             else:
-                position, target_height, fovy = (-6.5, 7.5, 4.0), 0.75, 32.0
-                render_size = (800, 480)
-            camera = rl.Camera3D(rl.Vector3(*position), rl.Vector3(0.0, 0.0, target_height),
+                position, look_at = (-6.5, 7.5, 4.0), (0.0, 0.0, 0.75)
+                fovy, render_size = 32.0, (800, 480)
+            camera = rl.Camera3D(rl.Vector3(*position), rl.Vector3(*look_at),
                                  rl.Vector3(0.0, 0.0, 1.0), fovy, rl.CameraProjection.CAMERA_PERSPECTIVE)
             view = rl.ffi.new("float[]", [camera.position.x, camera.position.y, camera.position.z])
             for shader, loc in self._vehicle_shaders:
@@ -2091,6 +2096,8 @@ class ClusterUiRenderer:
                 rl.unload_image(image)
             if target is not None:
                 rl.unload_render_texture(target)
+            if park_model is not None:
+                rl.unload_model(park_model)
 
     @staticmethod
     def _crop_car_image(image) -> bool:
@@ -2558,7 +2565,7 @@ class ClusterUiRenderer:
         reverse = not park and self._ev6_reverse_screen_active(state)
         k8 = ego_model_name(getattr(state, "car_fingerprint", "")) == "k8"
         k8_reverse_png = k8 and reverse and self._prepare_k8_reverse_image()
-        if k8 and not k8_reverse_png:
+        if k8 and not park and not k8_reverse_png:
             self._load_k8_vehicle_model()
         if park:
             if not k8:
@@ -3960,7 +3967,7 @@ class ClusterUiRenderer:
         except Exception as exc:
             print(f"K8 vehicle model load failed: {exc}", flush=True)
 
-    def _load_shaded_vehicle_model(self, path: Path):
+    def _load_shaded_vehicle_model(self, path: Path, *, attach_shading: bool = True):
         mesh = self._load_obj_mesh(path, park_materials=True)
         try:
             rl.upload_mesh(rl.ffi.addressof(mesh), False)
@@ -3971,7 +3978,8 @@ class ClusterUiRenderer:
         if not rl.is_model_valid(model):
             rl.unload_model(model)
             return None
-        self._attach_vehicle_shader(model)
+        if attach_shading:
+            self._attach_vehicle_shader(model)
         return model
 
     def _load_other_vehicle_models(self) -> list[object]:

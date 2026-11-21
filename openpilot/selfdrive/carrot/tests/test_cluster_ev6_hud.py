@@ -112,7 +112,7 @@ def test_driving_does_not_load_or_prepare_park_resources(monkeypatch, gear, onro
 
 
 @pytest.mark.parametrize("gear,expected", [
-  ("P", ["load_k8", "park_model"]),
+  ("P", ["park_model"]),
   ("R", ["reverse_png"]),
   ("D", ["load_k8"]),
 ])
@@ -132,11 +132,15 @@ def test_k8_park_prepares_the_3d_model(monkeypatch, gear, expected):
 def test_k8_park_does_not_render_ev6_if_its_mesh_failed(monkeypatch):
   renderer = ClusterUiRenderer()
   renderer._park_vehicle_model = object()
+  attempts = []
+  monkeypatch.setattr(renderer, "_load_shaded_vehicle_model",
+                      lambda path, *, attach_shading: attempts.append((path.name, attach_shading)))
   monkeypatch.setattr(renderer_module.rl, "load_render_texture", lambda *_: pytest.fail("Wrong vehicle would render"))
   state = replace(standby_state(), onroad=True, gear_text="P", car_fingerprint="KIA_K8_HEV_1ST_GEN")
 
   renderer._prepare_park_model_texture(state)
   assert renderer._park_model_texture is None
+  assert attempts == [("k8_park.obj", False)]
 
 
 def test_loaded_park_models_never_replace_driving_models(monkeypatch):
