@@ -444,6 +444,8 @@ Experimental DM switches to standard monitoring for 20 seconds only when moving 
 
 ## ej lane centering
 
+Laneless lane centering temporarily reduces its correction when the inferred lane midpoint jumps relative to the model path and the lane boundaries become inconsistent. It resumes after about one second from the last jump once new frames show stable lane boundaries on both sides.
+
 **Settings → ej → Lane centering → Lane correction during obstacle avoidance** (`LaneAvoidanceMode`) supports the K8 Hybrid (`KIA_K8_HEV_1ST_GEN`). Mode `0` is Off, mode `1` records avoidance candidates in the drive log and is the default, and mode `2` is Apply (experimental). Mode `2` reduces only the active `LaneCenter` correction in laneless mode when front and corner radar corroborate a stopped or slow-moving vehicle near the lane edge and the existing model path has room to pass it within the same lane. Lane mode uses its existing lane-based path and steering behavior. Use mode `2` only in a controlled test environment. The driver remains responsible for avoiding obstacles and controlling the vehicle.
 
 <a id="always-on-changes"></a>

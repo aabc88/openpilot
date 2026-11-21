@@ -157,8 +157,7 @@ def test_uncertain_edge_requires_room_for_its_inward_uncertainty_margin():
   assert drive(LaneAvoidanceGuard(), md)[-1].strength == 1.0
 
 
-@pytest.mark.parametrize('side', [-1, 1])
-def test_actual_lane_center_gives_way_before_slew_limiting(side):
+def make_lane_center_corrector(params=None):
   source = Path(__file__).parents[1] / 'lib/drive_helpers.py'
   tree = ast.parse(source.read_text(encoding='utf8'))
   nodes = [n for n in tree.body if (
@@ -169,25 +168,128 @@ def test_actual_lane_center_gives_way_before_slew_limiting(side):
   clock = SimpleNamespace(now=0.0)
   namespace = {'np': np, 'math': math, 'time': SimpleNamespace(monotonic=lambda: clock.now)}
   exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source), 'exec'), namespace)
-  corrector = namespace['LaneCenterCorrector'](SimpleNamespace(get=lambda *args, **kwargs: None))
+  settings = {} if params is None else params
+  return namespace['LaneCenterCorrector'](SimpleNamespace(get=lambda key, **_: settings.get(key))), clock
+
+
+def center_step(corrector, clock, md, *, fresh=True, lane_changing=False, **kwargs):
+  clock.now += STEP
+  if fresh:
+    md.timestampEof = round(clock.now * 1e9)
+  return corrector.update(md, EGO_SPEED, lane_changing, **kwargs)
+
+
+def shift_center(md, delta, *, width_delta=0.0):
+  md.laneLines[1].y += delta - width_delta / 2.0
+  md.laneLines[2].y += delta + width_delta / 2.0
+
+
+@pytest.mark.parametrize('side', [-1, 1])
+def test_actual_lane_center_gives_way_before_slew_limiting(side):
+  corrector, clock = make_lane_center_corrector()
   md = model(side)
   opposing = SimpleNamespace(side=side, strength=1.0, approachStart=0.0)
   same_direction = SimpleNamespace(side=-side, strength=1.0, approachStart=0.0)
   far_away = SimpleNamespace(side=side, strength=1.0, approachStart=30.0)
 
-  assert corrector.update(md, EGO_SPEED, False) == 0.0
-  for n in range(1, 21):
-    clock.now = n * STEP
-    baseline = corrector.update(md, EGO_SPEED, False)
+  assert center_step(corrector, clock, md) == 0.0
+  for _ in range(20):
+    baseline = center_step(corrector, clock, md)
   assert side * baseline > 0.0
-  clock.now += STEP
-  assert corrector.update(md, EGO_SPEED, False, avoidance=same_direction) == baseline
-  clock.now += STEP
-  assert corrector.update(md, EGO_SPEED, False, avoidance=far_away) == baseline
-  clock.now += STEP
-  first = corrector.update(md, EGO_SPEED, False, avoidance=opposing)
+  assert center_step(corrector, clock, md, avoidance=same_direction) == baseline
+  assert center_step(corrector, clock, md, avoidance=far_away) == baseline
+  first = center_step(corrector, clock, md, avoidance=opposing)
   assert side * (baseline - first) == pytest.approx(0.01 * STEP)
   for _ in range(20):
-    clock.now += STEP
-    last = corrector.update(md, EGO_SPEED, False, avoidance=opposing)
+    last = center_step(corrector, clock, md, avoidance=opposing)
   assert last == 0.0
+
+
+def test_lane_center_preserves_stable_offset_slow_drift_and_matching_curve():
+  corrector, clock = make_lane_center_corrector()
+  md = model()
+  for _ in range(21):
+    baseline = center_step(corrector, clock, md)
+  assert baseline > 0.0
+  for n in range(30):
+    shift_center(md, 0.0075)
+    previous = center_step(corrector, clock, md)
+    assert previous == pytest.approx(baseline * (0.50 + (n + 1) * 0.0075) / 0.50)
+  for _ in range(16):
+    # A changing road curvature shifts both model and lane center together.
+    curve = 0.0006 * X * X
+    md.position.y += curve
+    md.laneLines[1].y += curve
+    md.laneLines[2].y += curve
+    assert center_step(corrector, clock, md) == pytest.approx(previous)
+  # A symmetric width change leaves the inferred center in the same place.
+  shift_center(md, 0.0, width_delta=0.60)
+  assert center_step(corrector, clock, md) == pytest.approx(previous)
+
+
+@pytest.mark.parametrize('side', [-1, 1])
+@pytest.mark.parametrize('jump', ['midpoint', 'one_boundary'])
+def test_lane_center_suppresses_abrupt_geometry_before_slew_and_recovers(side, jump):
+  corrector, clock = make_lane_center_corrector()
+  md = model(side)
+  for _ in range(21):
+    baseline = center_step(corrector, clock, md)
+  assert side * baseline > 0.0
+  if jump == 'midpoint':
+    shift_center(md, side * 1.0)
+  else:
+    shift_center(md, side * 0.30, width_delta=-0.60)
+
+  first = center_step(corrector, clock, md)
+  assert side * (baseline - first) == pytest.approx(0.01 * STEP)
+  for _ in range(19):
+    previous, first = first, center_step(corrector, clock, md)
+    assert -(0.01 * STEP + 1e-12) <= side * (first - previous) <= 0.0
+  assert first == pytest.approx(0.0)
+  for _ in range(28):
+    previous, first = first, center_step(corrector, clock, md)
+    assert 0.0 <= side * (first - previous) <= 0.01 * STEP + 1e-12
+  assert side * first > 0.0
+
+
+def test_lane_center_recovery_requires_fresh_stable_model_frames():
+  corrector, clock = make_lane_center_corrector()
+  md = model()
+  for _ in range(21):
+    center_step(corrector, clock, md)
+  shift_center(md, 1.0)
+  center_step(corrector, clock, md)
+  for _ in range(50):
+    result = center_step(corrector, clock, md, fresh=False)
+  assert result == 0.0
+  for _ in range(4):
+    assert center_step(corrector, clock, md) == 0.0
+  for _ in range(30):
+    result = center_step(corrector, clock, md)
+  assert result > 0.0
+
+
+def test_lane_center_settings_and_lane_change_discard_old_midpoint_history():
+  params = {'LaneCenterEnable': True}
+  corrector, clock = make_lane_center_corrector(params)
+  md = model()
+  for _ in range(21):
+    baseline = center_step(corrector, clock, md)
+  assert baseline > 0.0
+
+  params['LaneCenterEnable'] = False
+  shift_center(md, 0.85)
+  assert center_step(corrector, clock, md) < baseline
+  params['LaneCenterEnable'] = True
+  before = center_step(corrector, clock, md)
+  result = center_step(corrector, clock, md)
+  assert result > before
+
+  shift_center(md, -0.85)
+  assert center_step(corrector, clock, md, lane_changing=True) < result
+  for _ in range(37):
+    result = center_step(corrector, clock, md)
+  assert result == 0.0
+  for _ in range(14):
+    result = center_step(corrector, clock, md)
+  assert result > 0.0
