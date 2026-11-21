@@ -125,7 +125,6 @@ VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "cybertruck" / "cybertr
 PARK_VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "ev6" / "ev6_cluster.obj"
 K8_ASSET_DIR = CLUSTER_DIR / "assets" / "models" / "k8"
 K8_VEHICLE_MODEL_PATH = K8_ASSET_DIR / "k8_cluster.obj"
-K8_PARK_CAR_IMAGE = Path("/data/k8_park_car.png")
 # Cropped car bounds from the reverse camera at DESIGN_WIDTH × DESIGN_HEIGHT.
 K8_REVERSE_CAR_RECT = (455.5, 132.5, 428.0, 179.5)
 OTHER_VEHICLE_MODELS_DIR = CLUSTER_DIR / "assets" / "models" / "others"
@@ -1305,7 +1304,6 @@ class ClusterUiRenderer:
         self._park_model_key = None
         self._ev6_reverse_sprite = None
         self._ev6_reverse_sprite_key = None
-        self._k8_park_png_missing = False
         self._k8_reverse_png_missing = False
         self._ev6_park_textures = None
         self._ev6_park_retry_t = 0.0
@@ -1966,7 +1964,6 @@ class ClusterUiRenderer:
             textures.append(self._ev6_reverse_sprite[0])
         self._ev6_reverse_sprite = None
         self._ev6_reverse_sprite_key = None
-        self._k8_park_png_missing = False
         self._k8_reverse_png_missing = False
         # Detach handles first: close is idempotent, including after an interrupted unload.
         self._ev6_park_textures = None
@@ -1984,13 +1981,13 @@ class ClusterUiRenderer:
             raise failure
 
     @staticmethod
-    def _load_k8_gear_texture(path: Path, *, crop: bool = False):
+    def _load_k8_gear_texture(path: Path):
         if not path.is_file():
             return None
         image = texture = None
         try:
             image = rl.load_image(str(path))
-            if not rl.is_image_valid(image) or (crop and not ClusterUiRenderer._crop_car_image(image)):
+            if not rl.is_image_valid(image):
                 return None
             texture = rl.load_texture_from_image(image)
             if texture.id <= 0:
@@ -2007,22 +2004,6 @@ class ClusterUiRenderer:
                 rl.unload_texture(texture)
             if image is not None and rl.is_image_valid(image):
                 rl.unload_image(image)
-
-    def _prepare_k8_park_image(self) -> bool:
-        if self._park_model_key == "k8-png":
-            return True
-        if self._k8_park_png_missing:
-            return False
-        texture = self._load_k8_gear_texture(K8_PARK_CAR_IMAGE, crop=True)
-        if texture is None:
-            texture = self._load_k8_gear_texture(K8_ASSET_DIR / "k8_park.png")
-        if texture is None:
-            self._k8_park_png_missing = True
-            return False
-        if self._park_model_texture is not None:
-            rl.unload_texture(self._park_model_texture)
-        self._park_model_texture, self._park_model_key = texture, "k8-png"
-        return True
 
     def _prepare_k8_reverse_image(self) -> bool:
         key = ("k8-png", self.width, self.height)
@@ -2049,8 +2030,9 @@ class ClusterUiRenderer:
         """Cache the selected car before binding the main frame's render target."""
         if not self._ev6_park_screen_active(state):
             return
-        model, key = self._ego_model(ego_model_name(state.car_fingerprint))
-        if model is None or key == self._park_model_key:
+        name = ego_model_name(state.car_fingerprint)
+        model, key = self._ego_model(name)
+        if model is None or (name == "k8" and key != name) or key == self._park_model_key:
             return
         now = time.monotonic()
         if now < getattr(self, "_park_model_retry_t", 0.0):
@@ -2062,14 +2044,21 @@ class ClusterUiRenderer:
         self._park_model_key = None
         target = image = texture = None
         try:
-            camera = rl.Camera3D(rl.Vector3(-6.5, 7.5, 4.0), rl.Vector3(0.0, 0.0, 0.75),
-                                 rl.Vector3(0.0, 0.0, 1.0), 32.0, rl.CameraProjection.CAMERA_PERSPECTIVE)
+            if key == "k8":
+                # Match the front three-quarter view used to check the K8 body proportions.
+                position, target_height, fovy = (-5.8, 9.2, 1.95), 0.711, 26.0
+                render_size = (1600, 960)
+            else:
+                position, target_height, fovy = (-6.5, 7.5, 4.0), 0.75, 32.0
+                render_size = (800, 480)
+            camera = rl.Camera3D(rl.Vector3(*position), rl.Vector3(0.0, 0.0, target_height),
+                                 rl.Vector3(0.0, 0.0, 1.0), fovy, rl.CameraProjection.CAMERA_PERSPECTIVE)
             view = rl.ffi.new("float[]", [camera.position.x, camera.position.y, camera.position.z])
             for shader, loc in self._vehicle_shaders:
                 if loc >= 0:
                     rl.set_shader_value(shader, loc, view, rl.ShaderUniformDataType.SHADER_UNIFORM_VEC3)
             scale = self._ego_model_scale(key)
-            target = rl.load_render_texture(800, 480)
+            target = rl.load_render_texture(*render_size)
             rl.begin_texture_mode(target)
             try:
                 rl.clear_background(rl.BLANK)
@@ -2297,12 +2286,13 @@ class ClusterUiRenderer:
                                 rl.Color(0, 0, 0, 8 if theme.is_dark else 7))
             texture = self._park_model_texture
             name = ego_model_name(state.car_fingerprint)
-            k8_png = name == "k8" and self._park_model_key == "k8-png"
-            if name == "ev6" or (name == "k8" and not k8_png and self._k8_vehicle_model is None):
+            if name == "ev6":
                 texture = self._ev6_park_car_texture(theme.is_dark) or texture
+            elif name == "k8" and self._park_model_key != "k8":
+                texture = None
             if texture is not None:
                 car_w = car_h * texture.width / max(1, texture.height)
-                if k8_png and car_w > 700.0:
+                if name == "k8" and car_w > 700.0:
                     car_h *= 700.0 / car_w
                     car_w = 700.0
                 rl.draw_texture_pro(texture, rl.Rectangle(0, 0, texture.width, texture.height),
@@ -2567,16 +2557,19 @@ class ClusterUiRenderer:
         park = self._ev6_park_screen_active(state)
         reverse = not park and self._ev6_reverse_screen_active(state)
         k8 = ego_model_name(getattr(state, "car_fingerprint", "")) == "k8"
-        k8_png = k8 and ((park and self._prepare_k8_park_image()) or (reverse and self._prepare_k8_reverse_image()))
-        if k8 and not k8_png:
+        k8_reverse_png = k8 and reverse and self._prepare_k8_reverse_image()
+        if k8 and not k8_reverse_png:
             self._load_k8_vehicle_model()
-        if park or reverse:
-            if not k8_png:
+        if park:
+            if not k8:
                 self._load_park_vehicle_models()
-                if park:
-                    self._prepare_park_model_texture(state)
-                else:
-                    self._ev6_prepare_reverse_sprite(state)
+            self._prepare_park_model_texture(state)
+            self._trip_report_cache_visible = False
+            return
+        if reverse:
+            if not k8_reverse_png:
+                self._load_park_vehicle_models()
+                self._ev6_prepare_reverse_sprite(state)
             self._trip_report_cache_visible = False
             return
         if self._effective_screen_mode(state) != CLUSTER_SCREEN_MODE_TRIP_REPORT:
