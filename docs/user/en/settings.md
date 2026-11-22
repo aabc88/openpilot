@@ -125,7 +125,7 @@ The current `carrot_settings.json` contains **233 parameters**. The driver-monit
 | Vehicle and hardware | 32 | Hyundai/Kia, CAN FD/HDA, radar, driver monitoring, vehicle assistance, device hardware |
 | Display | 34 | Information, path, brightness/on-road view, external HUD |
 | System | 9 | Recording/power, network/map, sound, software |
-| ej | 16 | Min-distance clamp, lane centering, lateral acceleration limits, braking, UI |
+| ej | 17 | Min-distance clamp, lane centering, lateral acceleration limits, braking, UI |
 
 ## Driving control
 
@@ -443,6 +443,8 @@ Check storage use for recording and network use, heat, and privacy before enabli
 Experimental DM switches to standard monitoring for 20 seconds only when moving traffic first appears after an absence. Additional vehicles do not extend it; experimental monitoring then resumes, with no empty-road bonus while traffic remains.
 
 ## ej lane centering
+
+**Settings → ej → Lane centering → Minimum lane centering speed** (`LaneCenterMinSpeed`) accepts 0–150 km/h. The laneless centering correction applies when actual vehicle speed is at or above the threshold and the existing activation conditions are met. Below the threshold, the correction returns to zero at the existing rate limit. The default of `0` adds no speed restriction. Saving applies the change immediately. The minimum-distance clamp and lane mode keep their existing behavior.
 
 Laneless lane centering temporarily reduces its correction when the inferred lane midpoint jumps relative to the model path and the lane boundaries become inconsistent. It resumes after about one second from the last jump once new frames show stable lane boundaries on both sides.
 
