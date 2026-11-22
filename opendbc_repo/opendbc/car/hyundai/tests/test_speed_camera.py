@@ -370,6 +370,64 @@ def test_vehicle_navi_stale_calculated_route_rejects_route_filtered_bump():
   assert ret.speedBumpDistance == 0
 
 
+def test_vehicle_navi_bump_padding_keeps_the_last_real_route_timestamp():
+  state = _car_state()
+  state.vehicleNaviCanControl = 2
+  state.vehicleNaviEvents = [
+    {"type": "bump", "speed": 0, "kind": 6, "target": 200.0},
+    {"type": "camera", "speed": 50, "kind": 1, "target": 300.0},
+  ]
+  cp = CANParser("hyundai_canfd_generated", [("NEW_MSG_4B9", math.nan)], 0)
+  state.navi_segment_4b9 = cp.vl["NEW_MSG_4B9"]
+  real_route = ((8 << 13) | (1 << 22) | (6 << 24)).to_bytes(8, "little")
+  padding = b"\xff" * 8
+  ret = SimpleNamespace(speedLimit=0.0)
+  start = 1_000_000_000
+  expires = start + VEHICLE_NAVI_ROUTE_TIMEOUT_NS
+
+  cp.update([(start, [(0x4B9, real_route, 0)]), (start + 10, [(0x4B9, padding, 0)])])
+  state._update_vehicle_navi_events(cp, ret, False)
+  assert state.vehicleNaviRoutePathIndex == 8
+  assert state.vehicleNaviSegmentTimestamp == start
+  assert ret.speedBumpDistance == 200.0
+
+  cp.update([(expires, [(0x4B9, padding, 0)])])
+  state._update_vehicle_navi_events(cp, ret, False)
+  assert state.vehicleNaviSegmentTimestamp == start
+  assert ret.speedBumpDistance == 200.0
+
+  cp.update([(expires + 1, [(0x4B9, padding, 0)])])
+  state._update_vehicle_navi_events(cp, ret, False)
+  assert state.vehicleNaviRouteState == 0
+  assert state.vehicleNaviRoutePathIndex is None
+  assert ret.speedBumpDistance == 0
+  assert {event["type"] for event in state.vehicleNaviEvents} == {"camera"}
+
+
+@pytest.mark.parametrize(("mode", "payload", "expected_types"), (
+  (2, b"\xff" * 7 + b"\xfe", {"camera"}),
+  (2, ((9 << 13) | (1 << 22) | (6 << 24)).to_bytes(8, "little"), {"camera"}),
+  (2, ((2 << 22) | (6 << 24)).to_bytes(8, "little"), set()),
+  (3, b"\xff" * 8, set()),
+))
+def test_vehicle_navi_padding_does_not_hide_route_changes_or_change_mode_3(mode, payload, expected_types):
+  state = _car_state()
+  state.vehicleNaviCanControl = mode
+  state.vehicleNaviRouteState = 1
+  state.vehicleNaviRoutePathIndex = 8
+  state.vehicleNaviEvents = [
+    {"type": "bump", "speed": 0, "kind": 6, "target": 200.0},
+    {"type": "camera", "speed": 50, "kind": 1, "target": 300.0},
+  ]
+  cp = CANParser("hyundai_canfd_generated", [("NEW_MSG_4B9", math.nan)], 0)
+  state.navi_segment_4b9 = cp.vl["NEW_MSG_4B9"]
+  cp.update([(1_000_000_000, [(0x4B9, payload, 0)]), (1_000_000_010, [(0x4B9, b"\xff" * 8, 0)])])
+
+  state._update_vehicle_navi_events(cp, SimpleNamespace(speedLimit=0.0), False)
+
+  assert {event["type"] for event in state.vehicleNaviEvents} == expected_types
+
+
 def test_vehicle_navi_route_recalculation_clears_events():
   state = _car_state()
   state.vehicleNaviCanControl = True

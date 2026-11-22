@@ -1107,6 +1107,31 @@ class CarState(CarStateBase):
       "functional_road_class": (raw >> 24) & 0x7,
     }
 
+  def _vehicle_navi_segment_update(self, cp):
+    values = self.navi_segment_4b9
+    if values is None:
+      return 0, None
+
+    timestamp = self._vehicle_navi_message_timestamp(cp, "NEW_MSG_4B9")
+    if timestamp <= self.vehicleNaviSegmentTimestamp:
+      return 0, None
+    # In mode 2 only bumps use route matching. Keep camera behavior in
+    # mode 3, where an invalid route also clears camera events.
+    if self.vehicleNaviCanControl != 2 or any(value != 0xFF for value in values.values()):
+      return timestamp, values
+
+    # The last frame may be padding even when the parser received a real
+    # route frame in the same update. Use that frame's original timestamp.
+    batch = cp.vl_all["NEW_MSG_4B9"]
+    timestamps = cp.message_states[0x4B9].timestamps
+    for index, received_ns in enumerate(reversed(timestamps), start=1):
+      if index > len(batch["BYTE_1"]) or received_ns <= self.vehicleNaviSegmentTimestamp:
+        break
+      candidate = {name: batch[name][-index] for name in values}
+      if any(value != 0xFF for value in candidate.values()):
+        return received_ns, candidate
+    return 0, None
+
   def _vehicle_navi_is_controlled_access_road(self):
     link_class = int(self.hda_info_4a3.get("LinkClass", 0)) if self.hda_info_4a3 is not None else 0
     return (link_class in VEHICLE_NAVI_CONTROLLED_ACCESS_LINK_CLASSES or
@@ -1206,27 +1231,26 @@ class CarState(CarStateBase):
                        if position_recent and self.navi_position_4b4 is not None else 0)
     range_section_active = 0 < range_avg_speed < 511
 
-    if self.navi_segment_4b9 is not None:
-      timestamp = self._vehicle_navi_message_timestamp(cp, "NEW_MSG_4B9")
-      if timestamp > self.vehicleNaviSegmentTimestamp:
-        self.vehicleNaviSegmentTimestamp = timestamp
-        segment = self._decode_vehicle_navi_segment(self.navi_segment_4b9)
-        previous_route_state = self.vehicleNaviRouteState
-        previous_path_index = self.vehicleNaviRoutePathIndex
-        self.vehicleNaviRouteState = segment["calculated_route"]
-        self.vehicleNaviRoutePathIndex = (segment["path_index"]
-                                          if segment["calculated_route"] in (0, 1) else None)
-        if segment["functional_road_class"] != 7:
-          self.vehicleNaviRoadClass = segment["functional_road_class"]
-        if segment["calculated_route"] == 2:
-          self.vehicleNaviRouteResetTimestamp = timestamp
-          self._clear_vehicle_navi_events()
-          self._clear_vehicle_navi_speed_zone()
-          self._clear_vehicle_navi_school_zone()
-        elif (self.vehicleNaviCanControl >= 2 and
-              (segment["calculated_route"] != 1 or
-               (previous_route_state == 1 and previous_path_index != segment["path_index"]))):
-          self._clear_vehicle_navi_route_filtered_events()
+    timestamp, segment_values = self._vehicle_navi_segment_update(cp)
+    if segment_values is not None:
+      self.vehicleNaviSegmentTimestamp = timestamp
+      segment = self._decode_vehicle_navi_segment(segment_values)
+      previous_route_state = self.vehicleNaviRouteState
+      previous_path_index = self.vehicleNaviRoutePathIndex
+      self.vehicleNaviRouteState = segment["calculated_route"]
+      self.vehicleNaviRoutePathIndex = (segment["path_index"]
+                                        if segment["calculated_route"] in (0, 1) else None)
+      if segment["functional_road_class"] != 7:
+        self.vehicleNaviRoadClass = segment["functional_road_class"]
+      if segment["calculated_route"] == 2:
+        self.vehicleNaviRouteResetTimestamp = timestamp
+        self._clear_vehicle_navi_events()
+        self._clear_vehicle_navi_speed_zone()
+        self._clear_vehicle_navi_school_zone()
+      elif (self.vehicleNaviCanControl >= 2 and
+            (segment["calculated_route"] != 1 or
+             (previous_route_state == 1 and previous_path_index != segment["path_index"]))):
+        self._clear_vehicle_navi_route_filtered_events()
 
     route_age = getattr(cp, "_last_update_nanos", max(profile_timestamp, self.vehicleNaviSegmentTimestamp)) - self.vehicleNaviSegmentTimestamp
     if (self.vehicleNaviCanControl >= 2 and self.vehicleNaviRouteState == 1 and
