@@ -444,6 +444,8 @@ Experimental DM switches to standard monitoring for 20 seconds only when moving 
 
 ## ej lane centering
 
+With **Centering start distance** set to `15 cm`, correction starts after fresh model frames show a same-side offset over 15 cm for 0.3 seconds. The correction builds over 0.4 seconds. Once the offset falls below 7.5 cm, the correction returns to zero at the existing rate limit.
+
 **Settings → ej → Lane centering → Minimum lane centering speed** (`LaneCenterMinSpeed`) accepts 0–150 km/h. The laneless centering correction applies when actual vehicle speed is at or above the threshold and the existing activation conditions are met. Below the threshold, the correction returns to zero at the existing rate limit. The default of `0` adds no speed restriction. Saving applies the change immediately. The minimum-distance clamp and lane mode keep their existing behavior.
 
 Laneless lane centering temporarily reduces its correction when the inferred lane midpoint jumps relative to the model path and the lane boundaries become inconsistent. It resumes after about one second from the last jump once new frames show stable lane boundaries on both sides.
