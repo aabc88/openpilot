@@ -133,14 +133,13 @@ def test_k8_park_does_not_render_ev6_if_its_mesh_failed(monkeypatch):
   renderer = ClusterUiRenderer()
   renderer._park_vehicle_model = object()
   attempts = []
-  monkeypatch.setattr(renderer, "_load_shaded_vehicle_model",
-                      lambda path, *, attach_shading, use_texcoords: attempts.append((path.name, attach_shading, use_texcoords)))
+  monkeypatch.setattr(renderer_module.rl, "load_model", lambda path: attempts.append(path))
   monkeypatch.setattr(renderer_module.rl, "load_render_texture", lambda *_: pytest.fail("Wrong vehicle would render"))
   state = replace(standby_state(), onroad=True, gear_text="P", car_fingerprint="KIA_K8_HEV_1ST_GEN")
 
   renderer._prepare_park_model_texture(state)
   assert renderer._park_model_texture is None
-  assert attempts == [("k8_park.obj", False, True)]
+  assert attempts == [str(renderer_module.K8_PARK_MODEL_PATH)]
 
 
 def test_obj_texture_coordinates_are_loaded_in_face_order(monkeypatch, tmp_path):

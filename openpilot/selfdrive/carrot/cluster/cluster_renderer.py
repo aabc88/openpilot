@@ -127,6 +127,8 @@ K8_ASSET_DIR = CLUSTER_DIR / "assets" / "models" / "k8"
 K8_VEHICLE_MODEL_PATH = K8_ASSET_DIR / "k8_cluster.obj"
 K8_PARK_MODEL_PATH = K8_ASSET_DIR / "k8_park.obj"
 K8_PARK_SURFACE_PATH = K8_ASSET_DIR / "k8_park_surface.jpg"
+# Bounds of the K8 preview in its 1600 x 900 render target, in texture coordinates.
+K8_PARK_RENDER_CROP = (304, 231, 864, -386)
 # Cropped car bounds from the reverse camera at DESIGN_WIDTH × DESIGN_HEIGHT.
 K8_REVERSE_CAR_RECT = (455.5, 132.5, 428.0, 179.5)
 OTHER_VEHICLE_MODELS_DIR = CLUSTER_DIR / "assets" / "models" / "others"
@@ -1303,6 +1305,7 @@ class ClusterUiRenderer:
         self._other_vehicle_models: list[object] = []
         self._other_vehicle_names: list[str] = []
         self._park_model_texture = None
+        self._park_model_target = None
         self._park_model_key = None
         self._ev6_reverse_sprite = None
         self._ev6_reverse_sprite_key = None
@@ -1960,7 +1963,8 @@ class ClusterUiRenderer:
 
     def _close_park_textures(self) -> None:
         textures = list(self._ev6_park_textures or ())
-        if self._park_model_texture is not None:
+        park_target = self._park_model_target
+        if park_target is None and self._park_model_texture is not None:
             textures.append(self._park_model_texture)
         if self._ev6_reverse_sprite:
             textures.append(self._ev6_reverse_sprite[0])
@@ -1971,9 +1975,15 @@ class ClusterUiRenderer:
         self._ev6_park_textures = None
         self._ev6_park_retry_t = 0.0
         self._park_model_texture = None
+        self._park_model_target = None
         self._park_model_key = None
         self._park_model_retry_t = 0.0
         failure = None
+        if park_target is not None:
+            try:
+                rl.unload_render_texture(park_target)
+            except BaseException as exc:
+                failure = exc
         for texture in textures:
             try:
                 rl.unload_texture(texture)
@@ -2040,23 +2050,34 @@ class ClusterUiRenderer:
         if now < getattr(self, "_park_model_retry_t", 0.0):
             return
         self._park_model_retry_t = now + EV6_PARK_IMAGE_RETRY_S
-        if self._park_model_texture is not None:
+        if self._park_model_target is not None:
+            rl.unload_render_texture(self._park_model_target)
+            self._park_model_target = None
+        elif self._park_model_texture is not None:
             rl.unload_texture(self._park_model_texture)
-            self._park_model_texture = None
+        self._park_model_texture = None
         self._park_model_key = None
         target = image = texture = park_model = park_surface = None
         try:
             if key == "k8":
-                # Filter the projected surface across triangle edges, using its original lighting.
-                park_model = self._load_shaded_vehicle_model(K8_PARK_MODEL_PATH, attach_shading=False, use_texcoords=True)
-                if park_model is None:
-                    return
-                park_surface = rl.load_texture(str(K8_PARK_SURFACE_PATH))
-                if not rl.is_texture_valid(park_surface):
-                    return
+                # The OBJ loader resolves the MTL and its surface together. Raylib
+                # changes directory while parsing relative material paths.
+                if not K8_PARK_MODEL_PATH.is_file() or not K8_PARK_SURFACE_PATH.is_file():
+                    raise FileNotFoundError("K8 parked OBJ or surface is missing")
+                cwd = os.getcwd()
+                try:
+                    park_model = rl.load_model(str(K8_PARK_MODEL_PATH))
+                finally:
+                    if os.getcwd() != cwd:
+                        os.chdir(cwd)
+                if park_model is None or not rl.is_model_valid(park_model) or park_model.materialCount != 1:
+                    raise RuntimeError("K8 parked OBJ did not load")
+                albedo = park_model.materials[0].maps[rl.MaterialMapIndex.MATERIAL_MAP_ALBEDO].texture
+                if not rl.is_texture_valid(albedo) or albedo.id == rl.rl_get_texture_id_default():
+                    raise RuntimeError("K8 parked OBJ surface did not load")
+                park_surface = albedo
                 rl.gen_texture_mipmaps(park_surface)
-                rl.set_texture_filter(park_surface, rl.TextureFilter.TEXTURE_FILTER_TRILINEAR)
-                rl.set_material_texture(rl.ffi.addressof(park_model.materials[0]), rl.MaterialMapIndex.MATERIAL_MAP_ALBEDO, park_surface)
+                self._set_park_texture_filter(park_surface)
                 model = park_model
                 position, look_at = (-5.806969, 9.133412, 1.309627), (-0.020934, 0.002721, 0.713550)
                 fovy, render_size = 21.0, (1600, 900)
@@ -2071,6 +2092,8 @@ class ClusterUiRenderer:
                     rl.set_shader_value(shader, loc, view, rl.ShaderUniformDataType.SHADER_UNIFORM_VEC3)
             scale = self._ego_model_scale(key)
             target = rl.load_render_texture(*render_size)
+            if key == "k8" and not rl.is_render_texture_valid(target):
+                raise RuntimeError(f"Invalid parked-car render target for {key}")
             rl.begin_texture_mode(target)
             try:
                 rl.clear_background(rl.BLANK)
@@ -2084,6 +2107,16 @@ class ClusterUiRenderer:
                     rl.end_mode_3d()
             finally:
                 rl.end_texture_mode()
+            if key == "k8":
+                # Keep the preview on the GPU so the first P frame does not
+                # wait on a readback and a second texture upload.
+                self._park_model_texture = target.texture
+                rl.gen_texture_mipmaps(self._park_model_texture)
+                self._set_park_texture_filter(self._park_model_texture)
+                self._park_model_target, target = target, None
+                self._park_model_key = key
+                self._park_model_retry_t = 0.0
+                return
             image = rl.load_image_from_texture(target.texture)
             rl.image_flip_vertical(image)
             if not self._crop_car_image(image):
@@ -2095,6 +2128,7 @@ class ClusterUiRenderer:
             self._park_model_key = key
             self._park_model_retry_t = 0.0
         except Exception as exc:
+            self._park_model_texture = None
             print(f"Parked car preview unavailable: {exc}", flush=True)
         finally:
             if texture is not None:
@@ -2103,10 +2137,16 @@ class ClusterUiRenderer:
                 rl.unload_image(image)
             if target is not None:
                 rl.unload_render_texture(target)
-            if park_model is not None:
-                rl.unload_model(park_model)
             if park_surface is not None and rl.is_texture_valid(park_surface):
                 rl.unload_texture(park_surface)
+            if park_model is not None:
+                rl.unload_model(park_model)
+
+    @staticmethod
+    def _set_park_texture_filter(texture) -> None:
+        mode = (rl.TextureFilter.TEXTURE_FILTER_TRILINEAR if texture.mipmaps > 1
+                else rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
+        rl.set_texture_filter(texture, mode)
 
     @staticmethod
     def _crop_car_image(image) -> bool:
@@ -2307,11 +2347,13 @@ class ClusterUiRenderer:
             elif name == "k8" and self._park_model_key != "k8":
                 texture = None
             if texture is not None:
-                car_w = car_h * texture.width / max(1, texture.height)
+                source = (rl.Rectangle(*K8_PARK_RENDER_CROP) if self._park_model_target is not None and name == "k8"
+                          else rl.Rectangle(0, 0, texture.width, texture.height))
+                car_w = car_h * source.width / max(1, abs(source.height))
                 if name == "k8" and car_w > 700.0:
                     car_h *= 700.0 / car_w
                     car_w = 700.0
-                rl.draw_texture_pro(texture, rl.Rectangle(0, 0, texture.width, texture.height),
+                rl.draw_texture_pro(texture, source,
                                     rl.Rectangle(car_cx - car_w / 2, car_bottom - car_h, car_w, car_h),
                                     rl.Vector2(0, 0), 0.0, rl.WHITE)
 
