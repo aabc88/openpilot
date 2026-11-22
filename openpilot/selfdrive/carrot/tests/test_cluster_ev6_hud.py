@@ -134,13 +134,34 @@ def test_k8_park_does_not_render_ev6_if_its_mesh_failed(monkeypatch):
   renderer._park_vehicle_model = object()
   attempts = []
   monkeypatch.setattr(renderer, "_load_shaded_vehicle_model",
-                      lambda path, *, attach_shading: attempts.append((path.name, attach_shading)))
+                      lambda path, *, attach_shading, use_texcoords: attempts.append((path.name, attach_shading, use_texcoords)))
   monkeypatch.setattr(renderer_module.rl, "load_render_texture", lambda *_: pytest.fail("Wrong vehicle would render"))
   state = replace(standby_state(), onroad=True, gear_text="P", car_fingerprint="KIA_K8_HEV_1ST_GEN")
 
   renderer._prepare_park_model_texture(state)
   assert renderer._park_model_texture is None
-  assert attempts == [("k8_park.obj", False)]
+  assert attempts == [("k8_park.obj", False, True)]
+
+
+def test_obj_texture_coordinates_are_loaded_in_face_order(monkeypatch, tmp_path):
+  renderer = ClusterUiRenderer()
+  mesh_path = tmp_path / "test.obj"
+  mesh_path.write_text(
+    "v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0.1 0.2\nvt 0.3 0.4\nvt 0.5 0.6\nf 1/3 2/1 3/2\n", encoding="ascii",
+  )
+  ffi = renderer_module.rl.ffi
+  allocations = []
+
+  def allocate(kind, values):
+    allocations.append(ffi.new(kind, values))
+    return allocations[-1]
+
+  monkeypatch.setattr(renderer, "_alloc_float_array", lambda values: allocate("float[]", values))
+  monkeypatch.setattr(renderer, "_alloc_uchar_array", lambda values: allocate("unsigned char[]", values))
+  mesh = renderer._load_obj_mesh(mesh_path, use_texcoords=True)
+
+  assert list(ffi.unpack(mesh.texcoords, 6)) == pytest.approx([0.5, 0.4, 0.1, 0.8, 0.3, 0.6])
+  assert renderer._load_obj_mesh(mesh_path).texcoords == ffi.NULL
 
 
 def test_loaded_park_models_never_replace_driving_models(monkeypatch):

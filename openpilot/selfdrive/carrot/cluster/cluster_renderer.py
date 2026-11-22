@@ -126,6 +126,7 @@ PARK_VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "ev6" / "ev6_clust
 K8_ASSET_DIR = CLUSTER_DIR / "assets" / "models" / "k8"
 K8_VEHICLE_MODEL_PATH = K8_ASSET_DIR / "k8_cluster.obj"
 K8_PARK_MODEL_PATH = K8_ASSET_DIR / "k8_park.obj"
+K8_PARK_SURFACE_PATH = K8_ASSET_DIR / "k8_park_surface.jpg"
 # Cropped car bounds from the reverse camera at DESIGN_WIDTH × DESIGN_HEIGHT.
 K8_REVERSE_CAR_RECT = (455.5, 132.5, 428.0, 179.5)
 OTHER_VEHICLE_MODELS_DIR = CLUSTER_DIR / "assets" / "models" / "others"
@@ -2043,13 +2044,19 @@ class ClusterUiRenderer:
             rl.unload_texture(self._park_model_texture)
             self._park_model_texture = None
         self._park_model_key = None
-        target = image = texture = park_model = None
+        target = image = texture = park_model = park_surface = None
         try:
             if key == "k8":
-                # The painted materials are baked from this camera; a second lighting pass would darken them.
-                park_model = self._load_shaded_vehicle_model(K8_PARK_MODEL_PATH, attach_shading=False)
+                # Filter the projected surface across triangle edges, using its original lighting.
+                park_model = self._load_shaded_vehicle_model(K8_PARK_MODEL_PATH, attach_shading=False, use_texcoords=True)
                 if park_model is None:
                     return
+                park_surface = rl.load_texture(str(K8_PARK_SURFACE_PATH))
+                if not rl.is_texture_valid(park_surface):
+                    return
+                rl.gen_texture_mipmaps(park_surface)
+                rl.set_texture_filter(park_surface, rl.TextureFilter.TEXTURE_FILTER_TRILINEAR)
+                rl.set_material_texture(rl.ffi.addressof(park_model.materials[0]), rl.MaterialMapIndex.MATERIAL_MAP_ALBEDO, park_surface)
                 model = park_model
                 position, look_at = (-5.806969, 9.133412, 1.309627), (-0.020934, 0.002721, 0.713550)
                 fovy, render_size = 21.0, (1600, 900)
@@ -2098,6 +2105,8 @@ class ClusterUiRenderer:
                 rl.unload_render_texture(target)
             if park_model is not None:
                 rl.unload_model(park_model)
+            if park_surface is not None and rl.is_texture_valid(park_surface):
+                rl.unload_texture(park_surface)
 
     @staticmethod
     def _crop_car_image(image) -> bool:
@@ -3967,8 +3976,8 @@ class ClusterUiRenderer:
         except Exception as exc:
             print(f"K8 vehicle model load failed: {exc}", flush=True)
 
-    def _load_shaded_vehicle_model(self, path: Path, *, attach_shading: bool = True):
-        mesh = self._load_obj_mesh(path, park_materials=True)
+    def _load_shaded_vehicle_model(self, path: Path, *, attach_shading: bool = True, use_texcoords: bool = False):
+        mesh = self._load_obj_mesh(path, park_materials=True, use_texcoords=use_texcoords)
         try:
             rl.upload_mesh(rl.ffi.addressof(mesh), False)
             model = rl.load_model_from_mesh(mesh)
@@ -4181,12 +4190,14 @@ class ClusterUiRenderer:
             if image is not None and rl.is_image_valid(image):
                 rl.unload_image(image)
 
-    def _load_obj_mesh(self, path: Path, *, park_materials: bool = False):
+    def _load_obj_mesh(self, path: Path, *, park_materials: bool = False, use_texcoords: bool = False):
         vertices: list[tuple[float, float, float]] = []
         normals: list[tuple[float, float, float]] = []
+        texcoords: list[tuple[float, float]] = []
         mesh_vertices: list[float] = []
         mesh_normals: list[float] = []
         mesh_colors: list[int] = []
+        mesh_texcoords: list[float] = []
         material_color = DEFAULT_VEHICLE_MATERIAL_COLOR
 
         def resolve_index(index_text: str, count: int) -> int:
@@ -4195,13 +4206,18 @@ class ClusterUiRenderer:
                 index = count + index + 1
             return index - 1
 
-        def parse_face_token(token: str) -> tuple[int, int | None]:
+        def parse_face_token(token: str) -> tuple[int, int | None, int | None]:
             parts = token.split("/")
             vertex_index = resolve_index(parts[0], len(vertices))
+            texcoord_index = None
+            if use_texcoords:
+                if len(parts) < 2 or not parts[1]:
+                    raise ValueError(f"Missing texture coordinates in {path}")
+                texcoord_index = resolve_index(parts[1], len(texcoords))
             normal_index = None
             if len(parts) >= 3 and parts[2]:
                 normal_index = resolve_index(parts[2], len(normals))
-            return vertex_index, normal_index
+            return vertex_index, normal_index, texcoord_index
 
         def face_normal(points: tuple[tuple[float, float, float], ...]) -> tuple[float, float, float]:
             ax, ay, az = points[0]
@@ -4226,6 +4242,8 @@ class ClusterUiRenderer:
                 vertices.append((float(parts[1]), float(parts[2]), float(parts[3])))
             elif tag == "vn" and len(parts) >= 4:
                 normals.append((float(parts[1]), float(parts[2]), float(parts[3])))
+            elif use_texcoords and tag == "vt" and len(parts) >= 3:
+                texcoords.append((float(parts[1]), 1.0 - float(parts[2])))
             elif tag == "usemtl" and len(parts) >= 2:
                 material_color = (vehicle_material_color(parts[1]) if park_materials
                                   else VEHICLE_MATERIAL_COLORS.get(parts[1], DEFAULT_VEHICLE_MATERIAL_COLOR))
@@ -4233,14 +4251,16 @@ class ClusterUiRenderer:
                 face = [parse_face_token(token) for token in parts[1:]]
                 for index in range(1, len(face) - 1):
                     triangle = (face[0], face[index], face[index + 1])
-                    points = tuple(vertices[vertex_index] for vertex_index, _ in triangle)
+                    points = tuple(vertices[vertex_index] for vertex_index, _, _ in triangle)
                     fallback_normal = face_normal(points)
-                    for vertex_index, normal_index in triangle:
+                    for vertex_index, normal_index, texcoord_index in triangle:
                         vertex = vertices[vertex_index]
                         normal = normals[normal_index] if normal_index is not None else fallback_normal
                         mesh_vertices.extend(vertex)
                         mesh_normals.extend(normal)
                         mesh_colors.extend(material_color)
+                        if texcoord_index is not None:
+                            mesh_texcoords.extend(texcoords[texcoord_index])
 
         vertex_count = len(mesh_vertices) // 3
         if vertex_count < 3 or vertex_count % 3 != 0:
@@ -4252,6 +4272,8 @@ class ClusterUiRenderer:
         mesh.vertices = self._alloc_float_array(mesh_vertices)
         mesh.normals = self._alloc_float_array(mesh_normals)
         mesh.colors = self._alloc_uchar_array(mesh_colors)
+        if use_texcoords:
+            mesh.texcoords = self._alloc_float_array(mesh_texcoords)
         return mesh
 
     def _alloc_float_array(self, values: list[float]):
