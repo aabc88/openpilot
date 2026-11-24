@@ -393,8 +393,10 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ClampSteerAlert", {PERSISTENT, BOOL, "1"}},
 
     {"LaneCenterEnable", {PERSISTENT, BOOL, "1"}},
+    {"LaneCenterMinSpeed", {PERSISTENT, INT, "0"}},
     {"LaneCenterThreshold", {PERSISTENT, INT, "20"}},
     {"LaneCenterGain", {PERSISTENT, INT, "10"}},
+    {"LaneAvoidanceMode", {PERSISTENT, INT, "1"}},
 
     {"CameraOffset", {PERSISTENT, INT, "0"}},
 
