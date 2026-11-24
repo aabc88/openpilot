@@ -330,8 +330,33 @@
           <button id="btnToolsWebSettings" class="btn" type="button">Web Settings</button>
           <button id="btnDeviceInfo" class="btn" type="button">Info</button>
           <button id="btnToolsBluetooth" class="btn" type="button" aria-haspopup="dialog">Bluetooth</button>
+          <button id="btnToolsBlinkerPreview" class="btn" type="button" aria-haspopup="dialog">Signal preview</button>
           <button id="btnToolsAssistant" class="btn" type="button" aria-haspopup="dialog"><span aria-hidden="true">&#9881;</span> <span id="toolsAssistantLabel">ChatGPT 설정 도우미</span></button>
         </div>
+
+        <dialog id="toolsBlinkerPreview" class="blinker-preview" aria-labelledby="blinkerPreviewTitle" aria-describedby="blinkerPreviewDescription">
+          <header class="blinker-preview__header">
+            <h2 id="blinkerPreviewTitle" data-blinker-label="title">Turn signal preview</h2>
+            <form method="dialog">
+              <button class="btn" type="submit" data-blinker-label="close">Close</button>
+            </form>
+          </header>
+          <p id="blinkerPreviewDescription" class="muted" data-blinker-label="description">Screen preview only.</p>
+          <fieldset class="blinker-preview__modes">
+            <legend data-blinker-label="pattern">Flash pattern</legend>
+            <label><input name="blinker-preview-mode" type="radio" value="simultaneous" checked><span data-blinker-label="simultaneous">Simultaneous</span></label>
+            <label><input name="blinker-preview-mode" type="radio" value="alternating"><span data-blinker-label="alternating">Left–right alternating</span></label>
+          </fieldset>
+          <div class="blinker-preview__lamps" aria-hidden="true">
+            <span class="blinker-preview__lamp">←</span>
+            <span class="blinker-preview__lamp blinker-preview__lamp--right">→</span>
+          </div>
+          <div class="blinker-preview__footer">
+            <label class="blinker-preview__toggle"><input type="checkbox" role="switch"><span data-blinker-label="play">Screen preview</span></label>
+            <p class="muted" data-blinker-timing>Both on for 200 ms, off for 100 ms</p>
+          </div>
+          <p class="blinker-preview__reduced muted" data-blinker-label="reduced">Reduced motion is on. The timing is shown above.</p>
+        </dialog>
 
         <div class="section tools-group is-open" data-tools-group="git">
           <button class="tools-group__toggle" type="button" aria-expanded="true" aria-controls="toolsGroupBodyGit">

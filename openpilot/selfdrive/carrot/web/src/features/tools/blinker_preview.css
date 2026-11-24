@@ -1,0 +1,96 @@
+.blinker-preview {
+  width: min(420px, calc(100% - 32px));
+  box-sizing: border-box;
+  padding: 18px;
+  border: 1px solid var(--md-outline-var);
+  border-radius: 18px;
+  background: var(--md-surface);
+  color: var(--md-on-surface);
+}
+
+.blinker-preview::backdrop { background: rgb(0 0 0 / 62%); }
+
+.blinker-preview__header,
+.blinker-preview__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.blinker-preview h2 { margin: 0; font-size: 1.15rem; }
+.blinker-preview p { margin-block: 8px; }
+
+.blinker-preview__modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-block: 16px;
+  padding: 6px 0 0;
+  border: 0;
+}
+
+.blinker-preview__modes legend { font-weight: 600; }
+
+.blinker-preview__modes label,
+.blinker-preview__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  cursor: pointer;
+}
+
+.blinker-preview input { accent-color: var(--md-primary); }
+
+.blinker-preview__lamps {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  padding: 14px;
+  margin-bottom: 8px;
+  border: 1px solid var(--md-outline-var);
+  border-radius: 12px;
+  background: var(--md-surface-container-low, var(--md-surface));
+}
+
+.blinker-preview__lamp {
+  display: grid;
+  place-items: center;
+  min-width: 38px;
+  color: #d9a537;
+  opacity: .24;
+  font-size: 1.65rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.blinker-preview[data-running="true"][data-mode="simultaneous"] .blinker-preview__lamp {
+  animation: blinker-preview-together 300ms step-end infinite;
+}
+
+.blinker-preview[data-running="true"][data-mode="alternating"] .blinker-preview__lamp {
+  animation: blinker-preview-alternating 800ms step-end infinite;
+}
+
+.blinker-preview[data-running="true"][data-mode="alternating"] .blinker-preview__lamp--right {
+  animation-delay: -400ms;
+}
+
+.blinker-preview__reduced { display: none; }
+
+@keyframes blinker-preview-together {
+  0% { opacity: 1; }
+  66.6667%, 100% { opacity: .24; }
+}
+
+@keyframes blinker-preview-alternating {
+  0% { opacity: 1; }
+  50%, 100% { opacity: .24; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .blinker-preview[data-running="true"][data-mode] .blinker-preview__lamp { animation: none; }
+  .blinker-preview[data-running="true"] .blinker-preview__reduced { display: block; }
+}
