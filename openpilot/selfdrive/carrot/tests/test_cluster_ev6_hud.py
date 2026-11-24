@@ -129,17 +129,28 @@ def test_k8_park_prepares_the_3d_model(monkeypatch, gear, expected):
   assert calls == expected
 
 
-def test_k8_park_does_not_render_ev6_if_its_mesh_failed(monkeypatch):
+def test_k8_park_caches_its_own_preview_if_its_mesh_failed(monkeypatch):
   renderer = ClusterUiRenderer()
   renderer._park_vehicle_model = object()
   attempts = []
+  fallback = object()
+  loaded = []
+
+  def load_preview(path, *, mipmaps):
+    loaded.append((path, mipmaps))
+    return fallback
+
+  monkeypatch.setattr(renderer, "_load_k8_gear_texture", load_preview)
   monkeypatch.setattr(renderer_module.rl, "load_model", lambda path: attempts.append(path))
   monkeypatch.setattr(renderer_module.rl, "load_render_texture", lambda *_: pytest.fail("Wrong vehicle would render"))
   state = replace(standby_state(), onroad=True, gear_text="P", car_fingerprint="KIA_K8_HEV_1ST_GEN")
 
   renderer._prepare_park_model_texture(state)
-  assert renderer._park_model_texture is None
+  renderer._prepare_park_model_texture(state)
+  assert renderer._park_model_texture is fallback
+  assert renderer._park_model_key == "k8"
   assert attempts == [str(renderer_module.K8_PARK_MODEL_PATH)]
+  assert loaded == [(renderer_module.K8_PARK_PREVIEW_PATH, False)]
 
 
 def test_obj_texture_coordinates_are_loaded_in_face_order(monkeypatch, tmp_path):

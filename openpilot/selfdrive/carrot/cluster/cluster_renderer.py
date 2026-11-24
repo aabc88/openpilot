@@ -127,8 +127,8 @@ K8_ASSET_DIR = CLUSTER_DIR / "assets" / "models" / "k8"
 K8_VEHICLE_MODEL_PATH = K8_ASSET_DIR / "k8_cluster.obj"
 K8_PARK_MODEL_PATH = K8_ASSET_DIR / "k8_park.obj"
 K8_PARK_SURFACE_PATH = K8_ASSET_DIR / "k8_park_surface.jpg"
+K8_PARK_PREVIEW_PATH = K8_ASSET_DIR / "k8_park_preview.png"
 # Bounds of the K8 preview in its 1600 x 900 render target, in texture coordinates.
-K8_PARK_RENDER_CROP = (304, 231, 864, -386)
 # Cropped car bounds from the reverse camera at DESIGN_WIDTH × DESIGN_HEIGHT.
 K8_REVERSE_CAR_RECT = (455.5, 132.5, 428.0, 179.5)
 OTHER_VEHICLE_MODELS_DIR = CLUSTER_DIR / "assets" / "models" / "others"
@@ -1305,7 +1305,6 @@ class ClusterUiRenderer:
         self._other_vehicle_models: list[object] = []
         self._other_vehicle_names: list[str] = []
         self._park_model_texture = None
-        self._park_model_target = None
         self._park_model_key = None
         self._ev6_reverse_sprite = None
         self._ev6_reverse_sprite_key = None
@@ -1963,8 +1962,7 @@ class ClusterUiRenderer:
 
     def _close_park_textures(self) -> None:
         textures = list(self._ev6_park_textures or ())
-        park_target = self._park_model_target
-        if park_target is None and self._park_model_texture is not None:
+        if self._park_model_texture is not None:
             textures.append(self._park_model_texture)
         if self._ev6_reverse_sprite:
             textures.append(self._ev6_reverse_sprite[0])
@@ -1975,15 +1973,9 @@ class ClusterUiRenderer:
         self._ev6_park_textures = None
         self._ev6_park_retry_t = 0.0
         self._park_model_texture = None
-        self._park_model_target = None
         self._park_model_key = None
         self._park_model_retry_t = 0.0
         failure = None
-        if park_target is not None:
-            try:
-                rl.unload_render_texture(park_target)
-            except BaseException as exc:
-                failure = exc
         for texture in textures:
             try:
                 rl.unload_texture(texture)
@@ -1993,7 +1985,7 @@ class ClusterUiRenderer:
             raise failure
 
     @staticmethod
-    def _load_k8_gear_texture(path: Path):
+    def _load_k8_gear_texture(path: Path, *, mipmaps: bool = True):
         if not path.is_file():
             return None
         image = texture = None
@@ -2004,8 +1996,11 @@ class ClusterUiRenderer:
             texture = rl.load_texture_from_image(image)
             if texture.id <= 0:
                 return None
-            rl.gen_texture_mipmaps(texture)
-            rl.set_texture_filter(texture, rl.TextureFilter.TEXTURE_FILTER_TRILINEAR)
+            if mipmaps:
+                rl.gen_texture_mipmaps(texture)
+                rl.set_texture_filter(texture, rl.TextureFilter.TEXTURE_FILTER_TRILINEAR)
+            else:
+                rl.set_texture_filter(texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
             result, texture = texture, None
             return result
         except Exception as exc:
@@ -2050,10 +2045,7 @@ class ClusterUiRenderer:
         if now < getattr(self, "_park_model_retry_t", 0.0):
             return
         self._park_model_retry_t = now + EV6_PARK_IMAGE_RETRY_S
-        if self._park_model_target is not None:
-            rl.unload_render_texture(self._park_model_target)
-            self._park_model_target = None
-        elif self._park_model_texture is not None:
+        if self._park_model_texture is not None:
             rl.unload_texture(self._park_model_texture)
         self._park_model_texture = None
         self._park_model_key = None
@@ -2107,29 +2099,36 @@ class ClusterUiRenderer:
                     rl.end_mode_3d()
             finally:
                 rl.end_texture_mode()
-            if key == "k8":
-                # Keep the preview on the GPU so the first P frame does not
-                # wait on a readback and a second texture upload.
-                self._park_model_texture = target.texture
-                rl.gen_texture_mipmaps(self._park_model_texture)
-                self._set_park_texture_filter(self._park_model_texture)
-                self._park_model_target, target = target, None
-                self._park_model_key = key
-                self._park_model_retry_t = 0.0
-                return
             image = rl.load_image_from_texture(target.texture)
+            if key == "k8" and not rl.is_image_valid(image):
+                raise RuntimeError("K8 parked OBJ could not be read back")
             rl.image_flip_vertical(image)
-            if not self._crop_car_image(image):
+            cropped = self._crop_car_image(image)
+            if key == "k8" and (not cropped or (image.width, image.height) == render_size):
+                raise RuntimeError("K8 parked OBJ did not produce a transparent vehicle preview")
+            if not cropped:
                 return
             texture = rl.load_texture_from_image(image)
+            if key == "k8" and not rl.is_texture_valid(texture):
+                raise RuntimeError("K8 parked-car texture did not load")
             rl.gen_texture_mipmaps(texture)
-            rl.set_texture_filter(texture, rl.TextureFilter.TEXTURE_FILTER_TRILINEAR)
+            if key == "k8":
+                self._set_park_texture_filter(texture)
+            else:
+                rl.set_texture_filter(texture, rl.TextureFilter.TEXTURE_FILTER_TRILINEAR)
             self._park_model_texture, texture = texture, None
             self._park_model_key = key
             self._park_model_retry_t = 0.0
         except Exception as exc:
-            self._park_model_texture = None
             print(f"Parked car preview unavailable: {exc}", flush=True)
+            if key == "k8":
+                # Same OBJ, material and camera rendered ahead of time, for
+                # systems where native OBJ or offscreen rendering fails.
+                fallback = self._load_k8_gear_texture(K8_PARK_PREVIEW_PATH, mipmaps=False)
+                if fallback is not None:
+                    self._park_model_texture = fallback
+                    self._park_model_key = key
+                    self._park_model_retry_t = 0.0
         finally:
             if texture is not None:
                 rl.unload_texture(texture)
@@ -2347,8 +2346,7 @@ class ClusterUiRenderer:
             elif name == "k8" and self._park_model_key != "k8":
                 texture = None
             if texture is not None:
-                source = (rl.Rectangle(*K8_PARK_RENDER_CROP) if self._park_model_target is not None and name == "k8"
-                          else rl.Rectangle(0, 0, texture.width, texture.height))
+                source = rl.Rectangle(0, 0, texture.width, texture.height)
                 car_w = car_h * source.width / max(1, abs(source.height))
                 if name == "k8" and car_w > 700.0:
                     car_h *= 700.0 / car_w
