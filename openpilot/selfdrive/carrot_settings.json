@@ -732,10 +732,17 @@
           "zh": "车道居中",
           "params": [
             "LaneCenterEnable",
-            "LaneCenterMinSpeed",
             "LaneCenterThreshold",
-            "LaneCenterGain",
-            "LaneAvoidanceMode"
+            "LaneCenterGain"
+          ]
+        },
+        {
+          "id": "EJ_OFFSET",
+          "ko": "카메라 오프셋",
+          "en": "Camera offset",
+          "zh": "摄像头偏移",
+          "params": [
+            "CameraOffset"
           ]
         },
         {
@@ -4970,32 +4977,15 @@
     },
     {
       "group": "ej",
-      "name": "LaneCenterMinSpeed",
-      "title": "중앙 유지 최소 작동 속도",
-      "descr": "레인리스 중앙 유지 보정은 실제 차량 속도가 설정값 이상일 때 적용됩니다. 기준보다 느려지면 보정을 서서히 줄입니다. 0은 추가 속도 제한 없이 기존 동작을 사용합니다. 저장하면 재시작 없이 적용됩니다.",
-      "egroup": "EJ",
-      "etitle": "Minimum lane centering speed",
-      "edescr": "Laneless centering applies at or above this vehicle speed. Below it, the correction gradually fades out. 0 keeps the existing behavior without an additional speed limit. Applies immediately without restarting.",
-      "cgroup": "ej",
-      "ctitle": "车道居中最低车速",
-      "cdescr": "车速达到或超过设定值时，无车道线模式下的居中修正才会生效。低于此速度时逐步减小修正。0 表示保留原有行为，不增设车速限制。保存后立即生效，无需重启。",
-      "min": 0,
-      "max": 150,
-      "default": 0,
-      "unit": 1,
-      "display_unit": "speedKph"
-    },
-    {
-      "group": "ej",
       "name": "LaneCenterThreshold",
       "title": "중앙 유지 시작 거리(cm, 20)",
-      "descr": "모델 경로가 차로 중앙에서 설정 거리보다 더 벗어난 상태가 0.3초 이어지면 중앙 유지 보정이 시작됩니다. 보정 강도는 0.4초에 걸쳐 올라가고, 차이가 설정 거리의 절반보다 작아지면 부드럽게 줄어듭니다. 저장하면 재시작 없이 바로 적용됩니다.",
+      "descr": "차가 차선 중앙에서 이만큼 벗어나면 중앙 유지 보정이 시작됩니다. 작게 하면 더 일찍 잡아주지만 작은 출렁임에도 자주 동작할 수 있고, 크게 하면 벗어남이 커져야 동작합니다. 저장하면 재시작 없이 바로 적용됩니다.",
       "egroup": "EJ",
       "etitle": "Centering start distance (cm, 20)",
-      "edescr": "Centering starts after the model path stays beyond this distance from the lane center for 0.3 seconds. Correction builds over 0.4 seconds and fades out when the distance drops below half the setting. Applies immediately without restarting.",
+      "edescr": "Centering correction starts when the car drifts this far from the lane center. Smaller values correct earlier but may react to small wobbles; larger values wait for bigger drift. Applies immediately without restarting.",
       "cgroup": "ej",
       "ctitle": "居中启动距离(cm, 20)",
-      "cdescr": "模型路径偏离车道中心超过设定距离并持续 0.3 秒后开始居中修正。修正力度在 0.4 秒内逐步提高，距离低于设定值一半时逐步减小。保存后立即生效，无需重启。",
+      "cdescr": "车辆偏离车道中央达到该距离时开始居中修正。数值越小修正越早，但可能对小幅摆动也作出反应；数值越大则等偏离变大后才修正。保存后立即生效，无需重启。",
       "min": 5,
       "max": 50,
       "default": 20,
@@ -5019,26 +5009,20 @@
     },
     {
       "group": "ej",
-      "name": "LaneAvoidanceMode",
-      "title": "장애물 회피 중 차선 보정",
-      "descr": "K8 하이브리드를 지원합니다. 0은 끄기, 기본값 1은 회피 후보 기록입니다. 2는 전방·코너 레이더가 차로 가장자리의 정차·서행 차량을 교차 확인하고 모델 경로에 같은 차로 안에서 비켜 갈 여유가 있을 때 레인리스의 차선 중앙 유지(LaneCenter) 보정만 줄입니다. 레인모드는 기존 방식으로 조향합니다. 2는 통제된 시험 환경에서만 사용하세요.",
+      "name": "CameraOffset",
+      "title": "카메라 오프셋 (0)cm",
+      "descr": "레인리스에서 차를 옆으로 일정량 밀어줍니다. (+)는 오른쪽, (-)는 왼쪽으로 이동합니다. 차선을 보지 않고 모델 경로 기준으로 밀어주므로 차선이 0개/1개여도 동작합니다. (왼쪽 차선만 보임) 또는 (제일 왼쪽 차선)일 때만 작동합니다. 0이면 끕니다. 중앙 유지와 함께 켜면 서로 부딪히므로 하나만 쓰는 것이 좋습니다. 저장하면 재시작 없이 바로 적용됩니다.",
       "egroup": "EJ",
-      "etitle": "Lane correction during obstacle avoidance",
-      "edescr": "Supports K8 Hybrid. 0 turns the feature off. The default, 1, records avoidance candidates in the drive log. Mode 2 reduces only the LaneCenter correction in laneless mode when front and corner radar corroborate a stopped or slow-moving vehicle near the lane edge and the model path has room to pass it within the same lane. Lane mode keeps its existing steering behavior. Use mode 2 only in a controlled test environment.",
+      "etitle": "Camera offset (0)cm",
+      "edescr": "Shifts the car sideways by a fixed amount in laneless mode. (+) moves right, (-) moves left. Works with 0 or 1 lane lines since it shifts relative to the model path. Only active when only the left lane line is visible or in the leftmost lane. 0 disables it. Do not use together with lane centering — they fight each other. Applies immediately without restarting.",
       "cgroup": "ej",
-      "ctitle": "避障时的车道修正",
-      "cdescr": "支持 K8 混动车型。0 为关闭，默认值 1 在行驶日志中记录避让候选。模式 2 在前向和角雷达交叉确认车道边缘有静止或缓行车辆且模型路径在同一车道内留有绕行空间时，仅减小无车道线模式下的车道居中（LaneCenter）修正。车道线模式沿用原有转向逻辑。请仅在受控测试环境中使用模式 2。",
-      "min": 0,
-      "max": 2,
-      "default": 1,
+      "ctitle": "摄像头偏移 (0)cm",
+      "cdescr": "在无车道线模式下将车辆横向移动固定距离。(+)向右，(-)向左。基于模型路径移动，因此0条或1条车道线时也能工作。仅在只看到左侧车道线或处于最左侧车道时生效。0 关闭。请勿与车道居中同时使用，两者会互相冲突。保存后立即生效，无需重启。",
+      "min": -50,
+      "max": 50,
+      "default": 0,
       "unit": 1,
-      "risk": "high",
-      "control": "select",
-      "options": {
-        "ko": ["끄기", "기록만", "실험 적용"],
-        "en": ["Off", "Log only", "Apply (experimental)"],
-        "zh": ["关闭", "仅记录", "应用（实验）"]
-      }
+      "display_unit": "distanceCm"
     },
     {
       "group": "ej",

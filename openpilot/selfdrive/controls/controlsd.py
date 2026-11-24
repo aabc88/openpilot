@@ -19,7 +19,7 @@ from opendbc.car.hyundai.stop_object import signal_stop_object_requested
 from opendbc.car.volkswagen.values import MEB_CURVATURE_PID_KP, MEB_CURVATURE_PID_KI, MEB_CURVATURE_PID_KF, MEB_CURVATURE_MAX
 
 from openpilot.selfdrive.car.voice_indicator import set_lane_change_blinkers
-from openpilot.selfdrive.controls.lib.drive_helpers import ClampSteerCorrector, LaneCenterCorrector, clip_curvature, get_lag_adjusted_curvature, is_volkswagen_meb, read_lat_accel_limits
+from openpilot.selfdrive.controls.lib.drive_helpers import CameraOffsetCorrector, ClampSteerCorrector, LaneCenterCorrector, clip_curvature, get_lag_adjusted_curvature, is_volkswagen_meb, read_lat_accel_limits
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl, MIN_LATERAL_CONTROL_SPEED
 from openpilot.selfdrive.controls.lib.latcontrol_pid import LatControlPID
 from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle, STEER_ANGLE_SATURATION_THRESHOLD
@@ -113,6 +113,10 @@ class Controls:
     # 밀어내는 안전장치라면, 중앙 유지는 평소에 차를 차선 가운데로 이끈다.
     # 클램프와 같은 방식으로 계산하고 같은 자리에 더해진다.
     self.lane_center_corrector = LaneCenterCorrector(self.params)
+    # 레인리스 조향용 카메라 오프셋 보정기. 모델 경로 기준으로 차를 옆으로
+    # 일정량 밀어준다. 차선을 보지 않으므로 차선이 0개/1개여도 동작하고,
+    # (왼쪽 차선만 보임) 또는 (제일 왼쪽 차선)일 때만 작동한다.
+    self.camera_offset_corrector = CameraOffsetCorrector(self.params)
 
   def update(self):
     self.sm.update(15)
@@ -243,18 +247,10 @@ class Controls:
                        or CS.leftBlinker or CS.rightBlinker
                        or getattr(self.sm['carrotMan'], 'atc_active', False))
       clamp_kappa = self.clamp_steer_corrector.update(model_v2, CS.vEgo, lane_changing)
-      avoidance = None
-      lane_avoidance = lat_plan.laneAvoidance
-      if (lane_avoidance.applyEnabled and self.sm.valid['lateralPlan'] and not lane_changing
-          and not (CS.steeringPressed or CS.brakePressed or CS.gasPressed)
-          and 0 <= time.monotonic() - self.sm.logMonoTime['lateralPlan'] * 1e-9 <= 0.20
-          and abs(self.sm.logMonoTime['modelV2'] - lat_plan.modelMonoTime) <= 150_000_000
-          and lane_avoidance.side in (-1, 1) and 0.0 < lane_avoidance.strength <= 1.0
-          and math.isfinite(lane_avoidance.approachStart)):
-        avoidance = lane_avoidance
-      center_kappa = self.lane_center_corrector.update(model_v2, CS.vEgo, lane_changing, avoidance=avoidance)
+      center_kappa = self.lane_center_corrector.update(model_v2, CS.vEgo, lane_changing)
+      offset_kappa = self.camera_offset_corrector.update(model_v2, CS.vEgo, lane_changing)
       new_desired_curvature = smooth_value(
-        model_v2.action.desiredCurvature + clamp_kappa + center_kappa, self.desired_curvature, 0.1)
+        model_v2.action.desiredCurvature + clamp_kappa + center_kappa + offset_kappa, self.desired_curvature, 0.1)
 
     # 횡가속/저크 한도는 ej 탭 파라미터에서 매 사이클 읽는다 (실시간 조절 가능).
     # 파일이 없으면 등록 기본값, 구 빌드에서는 상수 기본값으로 동작한다.
