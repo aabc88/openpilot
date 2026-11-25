@@ -301,7 +301,13 @@
             <h2 id="modelLibraryTitle"></h2>
             <button id="btnCloseModelLibrary" class="btn" type="button"></button>
           </div>
-          <div id="modelLibraryEditor"></div>
+          <section id="internalModelLibrary" aria-labelledby="internalModelLibraryTitle" hidden>
+            <h3 id="internalModelLibraryTitle"></h3>
+            <p id="internalModelSummary"></p>
+            <ul id="internalModelChoices" class="model-library__choices"></ul>
+            <p id="internalModelStatus" role="status" hidden></p>
+          </section>
+          <section id="modelLibraryEditor"></section>
           <section id="egpuModelCard" class="egpu-model-card" hidden aria-live="polite">
             <div class="egpu-model-card__icon" aria-hidden="true">HB</div>
             <div class="egpu-model-card__body">

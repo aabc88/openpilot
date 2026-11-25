@@ -24,6 +24,7 @@ from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
 from openpilot.selfdrive.controls.lib.desire_lib.boundary_observer import BoundaryObserver
 from openpilot.selfdrive.controls.lib.desire_lib.tesla_turn import turn_signal_context
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, smooth_value, get_curvature_from_plan
+from openpilot.selfdrive.modeld import internal_model
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
 from openpilot.selfdrive.modeld.compile_modeld import make_input_queues, WARP_INPUTS, POLICY_INPUTS
 from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_driving_model_data, fill_pose_msg, PublishState
@@ -141,6 +142,7 @@ class ModelState:
 
     self.prev_desire = np.zeros(ModelConstants.DESIRE_LEN, dtype=np.float32)
     self.usbgpu = usbgpu
+    self.internal_candidate = pkl_path if not usbgpu else None
 
     self.frame_skip = ModelConstants.MODEL_RUN_FREQ // ModelConstants.MODEL_CONTEXT_FREQ
     self.input_queues, self.npy = make_input_queues(self.input_shapes, self.frame_skip, device=self.QUEUE_DEV)
@@ -150,7 +152,9 @@ class ModelState:
     self.frame_buf_params = {k: get_nv12_info(cam_w, cam_h) for k in ('img', 'big_img')}
     self.run_policy = jits['run_policy']
     self.warp = jits[(cam_w,cam_h)]
-    self.signal_shadow = ShadowClient.optional(modeld_pkl_path(False).parent / 'driving_supercombo.onnx') if enable_shadow and not usbgpu else None
+    self.signal_shadow = None
+    if enable_shadow and not usbgpu and self.internal_candidate is None:
+      self.signal_shadow = ShadowClient.optional(modeld_pkl_path(False).parent / 'driving_supercombo.onnx')
 
   def slice_outputs(self, model_outputs: np.ndarray, output_slices: dict[str, slice]) -> dict[str, np.ndarray]:
     parsed_model_outputs = {k: model_outputs[np.newaxis, v] for k,v in output_slices.items()}
@@ -167,6 +171,15 @@ class ModelState:
 
   def run(self, bufs: dict[str, VisionBuf], transforms: dict[str, np.ndarray],
           inputs: dict[str, np.ndarray], prepare_only: bool) -> dict[str, np.ndarray] | None:
+    try:
+      return self._run(bufs, transforms, inputs, prepare_only)
+    except Exception:
+      if self.internal_candidate is not None:
+        internal_model.record_failure(self.internal_candidate)
+      raise
+
+  def _run(self, bufs: dict[str, VisionBuf], transforms: dict[str, np.ndarray],
+           inputs: dict[str, np.ndarray], prepare_only: bool) -> dict[str, np.ndarray] | None:
     for key in bufs.keys():
       stride, y_height, uv_height, yuv_size = self.frame_buf_params[key]
       frame_data = np.frombuffer(bufs[key].data, dtype=np.uint8)
@@ -218,8 +231,8 @@ class ModelState:
     )
     model_output = outs.numpy()[0]
     shadow_payload = self.signal_shadow.capture(model_output, self.npy) if self.signal_shadow is not None else None
-    if self.usbgpu and not np.all(np.isfinite(model_output)):
-      raise RuntimeError("eGPU model output is not finite")
+    if (self.usbgpu or self.internal_candidate is not None) and not np.all(np.isfinite(model_output)):
+      raise RuntimeError(f"{'eGPU' if self.usbgpu else 'Polaris Vega'} model output is not finite")
     outputs_dict = self.parser.parse_outputs(self.slice_outputs(model_output, self.output_slices))
     self.npy['prev_feat'][:] = model_output[self.output_slices['hidden_state']]
 
@@ -228,6 +241,23 @@ class ModelState:
     if shadow_payload is not None:
       outputs_dict['_signal_shadow'] = shadow_payload
     return outputs_dict
+
+
+def load_internal_model(width, height, *, enable_shadow):
+  selected, candidate = internal_model.runtime_choice()
+  if candidate is not None:
+    try:
+      model = ModelState(width, height, False, pkl_path=candidate, enable_shadow=False)
+    except Exception:
+      cloudlog.exception("internal model %s failed to load; returning to CD210", selected)
+      internal_model.record_failure(candidate)
+    else:
+      internal_model.record_effective(selected)
+      return model
+
+  model = ModelState(width, height, False, enable_shadow=enable_shadow)
+  internal_model.record_effective(internal_model.CD210)
+  return model
 
 
 def main(demo=False):
@@ -344,8 +374,8 @@ def main(demo=False):
   # A standby model must not spawn a separate experimental ONNX observer that
   # receives no live samples. Keep standby inference/warmup and fallback intact;
   # optional comparison remains available when internal inference starts active.
-  small_model = ModelState(vipc_client_main.width, vipc_client_main.height, False,
-                           enable_shadow=not usbgpu_model_loaded) if model is None or USBGPU else None
+  small_model = load_internal_model(vipc_client_main.width, vipc_client_main.height,
+                                    enable_shadow=not usbgpu_model_loaded) if model is None or USBGPU else None
   if usbgpu_model_loaded:
     from openpilot.selfdrive.modeld.internal_model_warmup import warm_internal_model_from_camera
     warm_internal_model_from_camera(small_model, vipc_client_main)

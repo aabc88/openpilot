@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from contextlib import suppress
+from functools import partial
+import logging
+from threading import Event
 from typing import Any
 
 from aiohttp import web
@@ -14,6 +18,55 @@ from openpilot.selfdrive.modeld.egpu_worker_progress import current_failure, sav
 from openpilot.selfdrive.modeld.egpu_rejection import rejection_status, request_retry
 
 from ..services.params import HAS_PARAMS, Params
+
+
+logger = logging.getLogger(__name__)
+
+
+class InternalPreparation:
+  def __init__(self):
+    self.lock = asyncio.Lock()
+    self.closing = Event()
+    self.task: asyncio.Task[None] | None = None
+    self.error: str | None = None
+
+  def running(self) -> bool:
+    return self.task is not None and not self.task.done()
+
+
+INTERNAL_PREPARATION = web.AppKey('internal_model_preparation', InternalPreparation)
+
+
+def _internal_offroad(params: Any, preparation: InternalPreparation) -> bool:
+  try:
+    return (not preparation.closing.is_set() and params is not None and params.get_bool('IsOffroad') and
+            not params.get_bool('IsOnroad') and not params.get_bool('IsEngaged'))
+  except Exception:
+    return False
+
+
+async def _internal_status(preparation: InternalPreparation, offroad: Callable[[], bool]) -> dict[str, Any]:
+  from openpilot.selfdrive.modeld import internal_model
+  status = await asyncio.to_thread(internal_model.status, offroad())
+  if preparation.running():
+    status['preparing'] = True
+    status['can_change'] = False
+    status['can_prepare'] = False
+  if preparation.error is not None:
+    status['error'] = preparation.error
+  return status
+
+
+async def _prepare_internal(preparation: InternalPreparation, offroad: Callable[[], bool]) -> None:
+  from openpilot.selfdrive.modeld import internal_model
+  try:
+    await asyncio.to_thread(internal_model.prepare, offroad)
+  except Exception:
+    if offroad():
+      preparation.error = 'preparation_failed'
+      logger.exception('Polaris Vega preparation failed')
+    else:
+      preparation.error = 'preparation_interrupted'
 
 
 def _params_bool(params: Any, key: str) -> bool:
@@ -111,10 +164,55 @@ def build_status_payload(params: Any | None = None) -> dict[str, Any]:
   }
 
 
-async def api_status(_request: web.Request) -> web.Response:
+async def api_status(request: web.Request) -> web.Response:
   from openpilot.selfdrive.modeld.model_library import status
-  return web.json_response({**build_status_payload(), 'jetlink': jetlink_diagnostics(),
-                            'library': await asyncio.to_thread(status)})
+  params = Params() if HAS_PARAMS and Params is not None else None
+  preparation = request.app[INTERNAL_PREPARATION]
+  return web.json_response({**build_status_payload(params), 'jetlink': jetlink_diagnostics(),
+                            'library': await asyncio.to_thread(status),
+                            'internal': await _internal_status(preparation, partial(_internal_offroad, params, preparation))})
+
+
+async def api_internal_model(request: web.Request) -> web.Response:
+  from openpilot.selfdrive.modeld import internal_model
+  params = Params() if HAS_PARAMS and Params is not None else None
+  preparation = request.app[INTERNAL_PREPARATION]
+  offroad = partial(_internal_offroad, params, preparation)
+
+  try:
+    body = await request.json()
+  except (ValueError, TypeError):
+    body = None
+
+  error = None
+  if not isinstance(body, dict) or set(body) != {'action', 'model'}:
+    error = 'invalid_request'
+  elif body['action'] not in ('prepare', 'select') or body['model'] not in ('cd210', 'polaris-vega'):
+    error = 'invalid_request'
+  else:
+    action, model = body['action'], body['model']
+    async with preparation.lock:
+      if preparation.running():
+        error = 'preparation_busy'
+      elif not offroad():
+        error = 'offroad_required'
+      elif action == 'select':
+        try:
+          await asyncio.to_thread(internal_model.select, model, offroad)
+        except (OSError, RuntimeError, ValueError) as exc:
+          error = 'selection_failed' if offroad() else 'offroad_required'
+          if not isinstance(exc, ValueError):
+            logger.exception('Failed to select the internal model')
+      elif model != 'polaris-vega' or not internal_model.can_prepare():
+        error = 'preparation_unavailable'
+      else:
+        preparation.error = None
+        preparation.task = asyncio.create_task(_prepare_internal(preparation, offroad), name='internal-model-preparation')
+
+  response = {'ok': error is None, 'internal': await _internal_status(preparation, offroad)}
+  if error is not None:
+    response['error'] = error
+  return web.json_response(response, status=200 if error is None else 409)
 
 
 async def api_diagnostics(_request: web.Request) -> web.Response:
@@ -216,9 +314,22 @@ async def library_maintenance(app):
       await task
 
 
+async def internal_preparation_context(app: web.Application):
+  preparation = app[INTERNAL_PREPARATION]
+  try:
+    yield
+  finally:
+    preparation.closing.set()
+    if preparation.task is not None:
+      await preparation.task
+
+
 def register(app: web.Application) -> None:
+  app[INTERNAL_PREPARATION] = InternalPreparation()
+  app.cleanup_ctx.append(internal_preparation_context)
   app.cleanup_ctx.append(library_maintenance)
   app.router.add_get("/api/egpu/model", api_status)
+  app.router.add_post("/api/egpu/model/internal", api_internal_model)
   app.router.add_post("/api/egpu/model/library", api_library)
   app.router.add_get("/api/egpu/model/diagnostics", api_diagnostics)
   app.router.add_post("/api/egpu/model/retry-verification", api_retry_verification)
