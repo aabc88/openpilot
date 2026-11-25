@@ -170,12 +170,13 @@ def compile_model(source, output, offroad):
   from openpilot.common.transformations.model import MEDMODEL_INPUT_SIZE
   from openpilot.selfdrive.modeld.constants import ModelConstants
   env = dict(os.environ, DEV='QCOM', IMAGE='1', FLOAT16='1', NOLOCALS='1', JIT_BATCH_SIZE='0',
-             OPENPILOT_HACKS='1', WARP_DEV='QCOM')
+             OPENPILOT_HACKS='1', WARP_DEV='QCOM', PYTHONUNBUFFERED='1')
   args = ['taskset', '-c', '7', sys.executable, str(MODEL_DIR / 'compile_modeld.py'), '--onnx', str(source),
           '--output', str(output), '--model-size', f'{MEDMODEL_INPUT_SIZE[0]}x{MEDMODEL_INPUT_SIZE[1]}',
           '--camera-resolutions', *(f'{camera.width}x{camera.height}' for camera in (_ar_ox_fisheye, _os_fisheye)),
           '--frame-skip', str(ModelConstants.MODEL_RUN_FREQ // ModelConstants.MODEL_CONTEXT_FREQ), '--match-input-dtypes']
-  with output.with_name('compile.log').open('wb') as log:
+  log_path = output.with_name('compile.log')
+  with log_path.open('wb') as log:
     require_offroad(offroad)
     with subprocess.Popen(args, env=env, cwd=REPO, stdout=log, stderr=subprocess.STDOUT) as process:
       try:
@@ -190,7 +191,9 @@ def compile_model(source, output, offroad):
           process.kill()
           process.wait()
     if process.returncode:
-      raise RuntimeError('Polaris Vega could not be compiled by the internal GPU runtime')
+      with log_path.open('rb') as captured:
+        detail = captured.read(4096).decode('utf-8', errors='replace').strip()
+      raise RuntimeError(f'Polaris Vega compilation failed (exit {process.returncode})\n{detail}')
 
 
 def prepare(offroad: Callable[[], bool]):
