@@ -2,7 +2,6 @@ import asyncio
 import importlib.util
 import json
 from pathlib import Path
-from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -306,94 +305,3 @@ def test_library_retired_entry_cannot_be_selected(feature, monkeypatch, tmp_path
     async def json(self): return {'action': 'select', 'model': 'md-v3'}
   assert asyncio.run(feature.api_library(Request())).status == 409
   assert not (tmp_path / 'selection.json').exists()
-
-
-@pytest.fixture
-def internal_api(feature, monkeypatch):
-  from aiohttp import web
-  from openpilot.selfdrive import modeld
-  from openpilot.selfdrive.modeld import model_library
-
-  flags = {'IsOffroad'}
-  selected = []
-
-  def select(model, offroad):
-    assert offroad()
-    selected.append(model)
-
-  def status(can_change):
-    return {'selected': selected[-1] if selected else 'cd210', 'effective': 'cd210',
-            'preparing': False, 'can_change': can_change, 'can_prepare': can_change, 'error': None}
-
-  core = SimpleNamespace(select=select, status=status, can_prepare=lambda: True)
-  monkeypatch.setattr(modeld, 'internal_model', core, raising=False)
-  monkeypatch.setattr(model_library, 'status', lambda: {})
-  monkeypatch.setattr(feature, 'jetlink_diagnostics', lambda: {})
-  monkeypatch.setattr(feature, 'HAS_PARAMS', True)
-  monkeypatch.setattr(feature, 'Params', lambda: SimpleNamespace(get_bool=lambda key: key in flags))
-  app = web.Application()
-  feature.register(app)
-
-  class Request:
-    def __init__(self, action=None, model='polaris-vega'):
-      self.app = app
-      self.body = {'action': action, 'model': model}
-
-    async def json(self):
-      return self.body
-
-  return SimpleNamespace(flags=flags, selected=selected, core=core, request=Request, app=app)
-
-
-def test_builtin_model_status_is_returned_without_egpu(feature, internal_api):
-  response = asyncio.run(feature.api_status(internal_api.request()))
-  data = json.loads(response.text)
-  assert not data['available']
-  assert data['internal']['selected'] == data['internal']['effective'] == 'cd210'
-  assert data['internal']['can_change']
-
-
-@pytest.mark.parametrize('flags,allowed', [({'IsOffroad'}, True), (set(), False),
-                                           ({'IsOffroad', 'IsOnroad'}, False), ({'IsOffroad', 'IsEngaged'}, False)])
-def test_builtin_model_selection_requires_offroad_without_engagement(feature, internal_api, flags, allowed):
-  internal_api.flags.clear()
-  internal_api.flags.update(flags)
-  response = asyncio.run(feature.api_internal_model(internal_api.request('select')))
-  data = json.loads(response.text)
-  assert response.status == (200 if allowed else 409)
-  assert data['internal']['can_change'] is allowed
-  assert data['internal']['effective'] == 'cd210'
-  assert internal_api.selected == (['polaris-vega'] if allowed else [])
-
-
-def test_builtin_model_preparation_rechecks_offroad_and_is_exclusive(feature, internal_api):
-  started, finish = Event(), Event()
-
-  def prepare(offroad):
-    assert offroad()
-    started.set()
-    if not finish.wait(3) or not offroad():
-      raise RuntimeError('internal worker details')
-
-  internal_api.core.prepare = prepare
-
-  async def run():
-    try:
-      response = await feature.api_internal_model(internal_api.request('prepare'))
-      data = json.loads(response.text)
-      assert response.status == 200 and data['internal']['preparing']
-      assert not data['internal']['can_change']
-      assert await asyncio.to_thread(started.wait, 3)
-      for action in ('prepare', 'select'):
-        duplicate = await feature.api_internal_model(internal_api.request(action))
-        assert duplicate.status == 409 and json.loads(duplicate.text)['error'] == 'preparation_busy'
-      internal_api.flags.add('IsOnroad')
-    finally:
-      finish.set()
-      await internal_api.app[feature.INTERNAL_PREPARATION].task
-    status = json.loads((await feature.api_status(internal_api.request())).text)['internal']
-    assert not status['preparing'] and not status['can_change']
-    assert status['error'] == 'preparation_interrupted'
-    assert internal_api.selected == []
-
-  asyncio.run(run())

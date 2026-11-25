@@ -187,20 +187,6 @@
 .model-library-dialog::backdrop { background: #0009; }
 .model-library-dialog__heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .model-library-dialog h2 { margin: 0; font-size: 18px; }
-.model-library-dialog h3 { margin: 0; font-size: 15px; }
-.model-library-dialog section:not(.egpu-model-card) { margin-top: 16px; }
-.model-library__choices { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.model-library__choices li {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--md-outline-var);
-  border-radius: 10px;
-}
-.model-library__choices small { display: block; margin-top: 4px; color: var(--md-on-surface-var); }
 .model-library-dialog p { font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
 .model-library-dialog label { display: grid; gap: 6px; margin-bottom: 10px; }
 .model-library-dialog select { width: 100%; min-width: 0; padding: 12px; border-radius: 10px; background: var(--md-surface); color: var(--md-on-surface); }

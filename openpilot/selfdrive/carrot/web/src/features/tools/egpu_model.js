@@ -3,9 +3,7 @@ import { renderLibrary } from "./model_library.js";
 
 const POLL_INTERVAL_MS = 2000;
 let pollTimer = null;
-let refreshSequence = 0;
 let lastStatus = null;
-let statusFresh = true;
 let restartPending = false;
 
 const FALLBACK_STRINGS = {
@@ -152,7 +150,7 @@ function modelDisplayTitle(status, fallbackTitle = t("title")) {
 
 function render(status = lastStatus) {
   renderStatus(status);
-  renderLibrary(status?.library, false, status?.internal ?? null, statusFresh);
+  renderLibrary(status?.library);
 }
 
 function renderStatus(status) {
@@ -262,24 +260,15 @@ function renderStatus(status) {
 }
 
 async function refresh() {
-  const sequence = ++refreshSequence;
   try {
-    const status = await getJson("/api/egpu/model");
-    if (sequence !== refreshSequence) return;
-    statusFresh = true;
-    render(status);
+    render(await getJson("/api/egpu/model"));
   } catch (_error) {
-    if (sequence !== refreshSequence) return;
-    statusFresh = false;
     if (lastStatus?.jetlink) render({ ...lastStatus, jetlink: {
       ...lastStatus.jetlink, severity: "unknown", addresses: [], temp_c: null, reason: "", fresh: false,
     } });
-    else render(lastStatus);
   } finally {
-    if (sequence === refreshSequence) {
-      window.clearTimeout(pollTimer);
-      pollTimer = window.setTimeout(refresh, POLL_INTERVAL_MS);
-    }
+    window.clearTimeout(pollTimer);
+    pollTimer = window.setTimeout(refresh, POLL_INTERVAL_MS);
   }
 }
 

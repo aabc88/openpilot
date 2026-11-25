@@ -210,11 +210,10 @@ def make_warp(nv12, model_w, model_h, frame_skip):
   return warp
 
 
-def make_run_policy(model_runner, model_metadata, frame_skip, *, match_input_dtypes=False):
+def make_run_policy(model_runner, model_metadata, frame_skip):
   sample_desire_fn = partial(sample_desire, frame_skip=frame_skip)
   sample_skip_fn = partial(sample_skip, frame_skip=frame_skip)
   npy_shapes, npy_sizes = get_policy_npy_shapes(model_metadata['input_shapes'])
-  input_dtypes = {name: spec.dtype for name, spec in model_runner.graph_inputs.items()} if match_input_dtypes else {}
 
   def run_policy(warped, img_q, big_img_q, feat_q, desire_q, packed_npy_inputs):
     packed_npy_inputs = packed_npy_inputs.to(Device.DEFAULT)
@@ -236,8 +235,6 @@ def make_run_policy(model_runner, model_metadata, frame_skip, *, match_input_dty
       'traffic_convention': traffic_convention,
       'action_t': action_t,
     }
-    for name, dtype in input_dtypes.items():
-      inputs[name] = inputs[name].cast(dtype)
     out = next(iter(model_runner(inputs).values())).cast('float32')
     return out,
   return run_policy
@@ -314,7 +311,6 @@ if __name__ == "__main__":
   p.add_argument('--onnx', required=True)
   p.add_argument('--output', required=True)
   p.add_argument('--frame-skip', type=int, required=True)
-  p.add_argument('--match-input-dtypes', action='store_true', help='cast inputs to their declared ONNX dtypes')
   args = p.parse_args()
 
   model_path = read_file_chunked_to_disk(args.onnx)
@@ -323,8 +319,7 @@ if __name__ == "__main__":
   model_runner = OnnxRunner(model_path)
   out = {'metadata': make_metadata_dict(model_path)}
 
-  run_policy_jit = TinyJit(make_run_policy(model_runner, out['metadata'], args.frame_skip,
-                                          match_input_dtypes=args.match_input_dtypes), prune=True)
+  run_policy_jit = TinyJit(make_run_policy(model_runner, out['metadata'], args.frame_skip), prune=True)
 
   make_policy_queues = partial(make_input_queues, out['metadata']['input_shapes'], args.frame_skip)
   make_random_model_inputs = partial(make_random_images, keys=['warped'], shape=(2, 6, *out['metadata']['input_shapes']['img'][2:]), device=WARP_DEV)

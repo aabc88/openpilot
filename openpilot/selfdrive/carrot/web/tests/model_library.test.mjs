@@ -14,8 +14,7 @@ class Element {
 function setupDocument() {
   const elements = new Map();
   for (const id of ['externalModelLibrary', 'modelLibraryDialog', 'modelLibraryEditor',
-    'modelLibraryTitle', 'btnCloseModelLibrary', 'egpuModelCard', 'egpuModelState', 'egpuModelAmount',
-    'internalModelLibrary', 'internalModelLibraryTitle', 'internalModelSummary', 'internalModelChoices', 'internalModelStatus']) {
+    'modelLibraryTitle', 'btnCloseModelLibrary', 'egpuModelCard', 'egpuModelState', 'egpuModelAmount']) {
     elements.set(id, new Element('div'));
   }
   elements.get('egpuModelCard').hidden = true;
@@ -106,79 +105,4 @@ test('status updates preserve the open dialog and focused selection across inven
   assert.equal(elements.get('modelLibraryDialog').open, true);
   assert.equal(root.dataset.state, 'error');
   assert.equal(root.querySelector('p').textContent, 'eGPU unavailable');
-});
-
-const internal = {
-  selected: 'cd210', effective: 'cd210', can_change: true, can_prepare: true, preparing: false, error: null,
-  models: [{id: 'cd210', name: 'CD210', ready: true}, {id: 'polaris-vega', name: 'Polaris Vega', ready: false}],
-};
-
-test('without an external model the internal dialog prepares, then explicitly selects for the next ignition', async t => {
-  const old = {document: globalThis.document, postJson: globalThis.postJson};
-  t.after(() => Object.assign(globalThis, old));
-  const {root, editor, elements} = setupDocument();
-  const calls = [];
-  const ready = {...internal, models: internal.models.map(model => ({...model, ready: true}))};
-  globalThis.postJson = async (url, body) => {
-    calls.push({url, body});
-    return {ok: true, internal: body.action === 'prepare' ? {...internal, preparing: true} : {...ready, selected: body.model}};
-  };
-  renderLibrary(undefined, false, internal);
-  assert.equal(root.hidden, false);
-  assert.equal(editor.hidden, true);
-  root.querySelector('button').events.click();
-  assert.equal(elements.get('modelLibraryDialog').open, true);
-  assert.equal(elements.get('internalModelLibrary').hidden, false);
-  const vega = elements.get('internalModelChoices').children[1].querySelector('button');
-  assert.equal(vega.textContent, 'Prepare');
-  await vega.events.click();
-  assert.equal(vega.disabled, true);
-  assert.match(elements.get('internalModelStatus').textContent, /Downloading and preparing/);
-  assert.match(elements.get('internalModelSummary').textContent, /Next ignition · CD210/);
-  renderLibrary(data, false, ready);
-  assert.equal(vega, elements.get('internalModelChoices').children[1].querySelector('button'));
-  assert.equal(vega.textContent, 'Select');
-  assert.equal(vega.disabled, false);
-  assert.equal(editor.hidden, false);
-  assert.equal(editor.querySelector('select').value, 'flip-flop');
-  await vega.events.click();
-  assert.match(elements.get('internalModelSummary').textContent, /Running · CD210 · Next ignition · Polaris Vega/);
-  assert.deepEqual(calls, [
-    {url: '/api/egpu/model/internal', body: {action: 'prepare', model: 'polaris-vega'}},
-    {url: '/api/egpu/model/internal', body: {action: 'select', model: 'polaris-vega'}},
-  ]);
-});
-
-test('internal model actions respect vehicle and device gates and reflect preparation failures', async t => {
-  const old = {document: globalThis.document, postJson: globalThis.postJson};
-  t.after(() => Object.assign(globalThis, old));
-  const {elements} = setupDocument();
-  const status = elements.get('internalModelStatus');
-  let calls = 0;
-  globalThis.postJson = async () => { calls++; throw new Error('offline'); };
-  renderLibrary(data, false, {...internal, can_change: false}, true);
-  const vega = elements.get('internalModelChoices').children[1].querySelector('button');
-  assert.equal(vega.disabled, true);
-  assert.match(status.textContent, /Turn off the ignition/);
-  await vega.events.click();
-  renderLibrary(data, false, {...internal, can_prepare: false}, true);
-  assert.equal(vega.disabled, true);
-  assert.match(status.textContent, /cannot prepare/);
-  renderLibrary(data, false, internal, false);
-  assert.equal(vega.disabled, true);
-  assert.match(status.textContent, /Unable to refresh/);
-  await vega.events.click();
-  assert.equal(calls, 0);
-  renderLibrary(data, false, {...internal, error: 'runtime_rejected'}, true);
-  assert.equal(vega.disabled, false);
-  assert.match(status.textContent, /Polaris Vega could not start/);
-  renderLibrary(data, false, {...internal, error: 'preparation_interrupted'}, true);
-  assert.equal(vega.disabled, false);
-  assert.match(status.textContent, /Preparation was interrupted/);
-  renderLibrary(data, false, internal, true);
-  await vega.events.click();
-  assert.equal(calls, 1);
-  assert.match(status.textContent, /request failed/);
-  assert.equal(vega.disabled, false);
-  assert.match(elements.get('internalModelSummary').textContent, /Next ignition · CD210/);
 });
