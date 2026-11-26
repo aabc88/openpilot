@@ -3045,6 +3045,8 @@ class ClusterUiRenderer:
                 self._draw_camera_overlay_strip(strip, projection, scene.scene_shift_x_m)
             for strip in scene.lane_markings:
                 self._draw_camera_overlay_strip(strip, projection, scene.scene_shift_x_m)
+            for strip in scene.stock_lanes:
+                self._draw_camera_overlay_strip(strip, projection, scene.scene_shift_x_m)
             for strip in scene.planned_path:
                 self._draw_camera_overlay_strip(strip, projection, scene.scene_shift_x_m)
             self._profile_add("render_world.camera_projected_overlay.strips", profile_stage)
@@ -4370,6 +4372,10 @@ class ClusterUiRenderer:
             for strip in scene.lane_markings:
                 self._draw_strip(strip)
             self._profile_add("draw_scene.lane_markings", profile_stage)
+            profile_stage = self._profile_start()
+            for strip in scene.stock_lanes:
+                self._draw_strip(strip)
+            self._profile_add("draw_scene.stock_lanes", profile_stage)
             profile_stage = self._profile_start()
             path_grey = clean_ui_enabled() and state.lfa_active is False  # EV6 HUD patch v6
             for strip in scene.planned_path:

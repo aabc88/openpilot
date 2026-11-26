@@ -44,6 +44,7 @@ from cluster_models import (
     ModelPathPoint,
     ModelRiskPoint,
     RadarPoint,
+    StockLaneLine,
     RADAR_MOVING_VEHICLE_MIN_SPEED_KPH,
     RouteOverlay,
     TpmsInfo,
@@ -179,6 +180,37 @@ CORNER_RADAR_DBC_SIGNAL_NAMES = frozenset(
         "RR_DETECT_LATERAL",
     }
 )
+# 순정 전방 카메라 차선 기하 (CCNC_0x1B5, 0x1B5, K8 버스 0, ~20Hz).
+# DBC: opendbc/dbc/generator/hyundai/hyundai_canfd.dbc (BO_ 437 CCNC_0x1B5).
+# POSITION은 차 중심에서 각 차선까지 거리(m, +가 오른쪽, ±2.02m에서 잘림),
+# HEADING은 차선 방향(rad), CURVATURE는 곡률(1/m, +가 오른쪽 커브).
+# CURVATURE_DERIVATIVE는 1/3 시간 포화돼 있어 읽지 않음 (2026-11-26 rlog 3개 검증).
+# LEAD/LEAD_SPEED/LEAD_DISTANCE는 앞차 (3개 로그 전부 앞차 없어 미검증).
+STOCK_LANE_GEOMETRY_ADDRESS = 0x1B5
+STOCK_LANE_GEOMETRY_BUS = 0
+STOCK_LANE_STALE_S = 0.5
+STOCK_LANE_DBC_SIGNAL_NAMES = frozenset(
+    {
+        "LEFT_QUAL",
+        "LEFT_LDW",
+        "LEFT_POSITION",
+        "LEFT_HEADING",
+        "LEFT_CURVATURE",
+        "RIGHT_QUAL",
+        "RIGHT_LDW",
+        "RIGHT_POSITION",
+        "RIGHT_HEADING",
+        "RIGHT_CURVATURE",
+        "LEAD",
+        "LEAD_SPEED",
+        "LEAD_DISTANCE",
+    }
+)
+HYUNDAI_CANFD_DBC_MESSAGES = {
+    **CORNER_RADAR_DBC_MESSAGES,
+    STOCK_LANE_GEOMETRY_ADDRESS: "CCNC_0x1B5",
+}
+HYUNDAI_CANFD_DBC_SIGNAL_NAMES = CORNER_RADAR_DBC_SIGNAL_NAMES | STOCK_LANE_DBC_SIGNAL_NAMES
 ROUTE_REPLAY_MIN_BUFFER_FILES = 2
 ROUTE_REPLAY_START_BUFFER_FILES = 1
 ROUTE_REPLAY_READAHEAD_S = 5.0
@@ -528,6 +560,7 @@ class RouteReplayFrame:
     brake: float
     detected_vehicles: tuple[DetectedVehicle, ...]
     radar_points: tuple[RadarPoint, ...] = ()
+    stock_lane: StockLaneGeometry | None = None
     corner_radar_supported: bool = False
     tpms: TpmsInfo = TpmsInfo()
     ev_mode_valid: bool = False
@@ -1607,6 +1640,8 @@ class RouteLogParser:
         self.adrv_corner_message_t = -999.0
         self.adrv_lane_changing = 0
         self.adrv_lane_changing_t = -999.0
+        self.stock_lane: StockLaneGeometry | None = None
+        self.stock_lane_t = -999.0
         self.corner_radar_supported = False
         self.car_brand = ""
         self.car_fingerprint = ""
@@ -1802,6 +1837,11 @@ class RouteLogParser:
             model_road_edges=self.model_road_edges,
             model_path=self.model_path,
             model_path_source=self.model_path_source,
+            stock_lane=(
+                self.stock_lane
+                if self.stock_lane is not None and event_t - self.stock_lane_t <= STOCK_LANE_STALE_S
+                else None
+            ),
             lane_change_source=self.lane_change_source,
             lane_change=lane_change,
             lane_change_phase=lane_change_phase,
@@ -2379,14 +2419,23 @@ class RouteLogParser:
                     self.cutin_debug_text = "LOG CUT-IN: NO"
 
     def _update_can_detections(self, can_messages: Any, event_t: float, source_service: str = "can") -> None:
-        if self.front_radar_only:
-            return
         for can_message in can_messages:
             address = int(safe_get(can_message, "address", -1))
             bus = int(safe_get(can_message, "src", -1))
             if source_service == "can" and bus >= 0x80:
                 continue
             data = bytes(safe_get(can_message, "dat", b""))
+            if address == STOCK_LANE_GEOMETRY_ADDRESS:
+                # 순정 카메라 차선 기하 (0x1B5)는 코너 레이더 모드와 무관하게 읽는다.
+                # K8에서는 버스 0에 있고, 버스 128/130은 판다 포워딩 복사본이라 위에서 제외됨.
+                if source_service == "can" and bus == STOCK_LANE_GEOMETRY_BUS:
+                    parsed = parse_stock_lane_geometry(address, data, event_t=event_t)
+                    if parsed is not None:
+                        self.stock_lane = parsed
+                        self.stock_lane_t = event_t
+                continue
+            if self.front_radar_only:
+                continue
             if source_service == "can" and bus == RAW_CORNER_RADAR_BUS:
                 for obj in decode_raw_corner_objects(event_t, address, data):
                     raw_key = (obj.group, obj.slot)
@@ -3697,6 +3746,41 @@ class RouteLogParser:
         self.lane_change_recenter_start_progress = 1.0
 
 
+def stock_lane_lines_for_frame(
+    stock_lane: StockLaneGeometry | None,
+) -> tuple[StockLaneLine | None, StockLaneLine | None]:
+    """순정 차선 기하(0x1B5)를 좌/우 StockLaneLine으로 바꾼다.
+
+    QUAL이 2 미만이면 그 쪽은 못 믿는 값이라 None으로 버린다
+    (QUAL 3이 확신, 3개 로그에서 거의 항상 3). LDW는 0이 아니면 경고 중.
+    """
+    if stock_lane is None:
+        return None, None
+    left = (
+        StockLaneLine(
+            position_m=stock_lane.left_position_m,
+            heading_rad=stock_lane.left_heading_rad,
+            curvature=stock_lane.left_curvature,
+            qual=stock_lane.left_qual,
+            ldw=stock_lane.left_ldw != 0,
+        )
+        if stock_lane.left_qual >= 2
+        else None
+    )
+    right = (
+        StockLaneLine(
+            position_m=stock_lane.right_position_m,
+            heading_rad=stock_lane.right_heading_rad,
+            curvature=stock_lane.right_curvature,
+            qual=stock_lane.right_qual,
+            ldw=stock_lane.right_ldw != 0,
+        )
+        if stock_lane.right_qual >= 2
+        else None
+    )
+    return left, right
+
+
 def frame_to_state(frame: RouteReplayFrame) -> ClusterUiState:
     lane_width_m = clamp(frame.lane_width_m, 2.4, 4.6)
     observed_ego_lane_offset = 0.0
@@ -3743,6 +3827,8 @@ def frame_to_state(frame: RouteReplayFrame) -> ClusterUiState:
         use_animated_lane_grid,
     )
 
+    stock_left_lane, stock_right_lane = stock_lane_lines_for_frame(frame.stock_lane)
+
     return ClusterUiState(
         car_fingerprint=frame.car_fingerprint,
         speed_kph=frame.speed_kph,
@@ -3782,6 +3868,8 @@ def frame_to_state(frame: RouteReplayFrame) -> ClusterUiState:
         right_road_edge_points=right_road_edge_points,
         left_road_edge_lateral_shift_m=left_road_edge_lateral_shift_m,
         right_road_edge_lateral_shift_m=right_road_edge_lateral_shift_m,
+        stock_left_lane=stock_left_lane,
+        stock_right_lane=stock_right_lane,
         throttle=frame.throttle,
         brake=frame.brake,
         model_path=frame.model_path,
@@ -4561,6 +4649,60 @@ def car_state_corner_detections(car_state: Any) -> tuple[DetectedVehicle, ...]:
     return tuple(detections)
 
 
+@dataclass(frozen=True)
+class StockLaneGeometry:
+    """순정 전방 카메라가 보는 좌우 차선 기하 정보 (0x1B5 CCNC_0x1B5).
+
+    POSITION은 차 중심에서 각 차선까지 거리(m, +가 오른쪽),
+    HEADING은 차선 방향(rad), CURVATURE는 곡률(1/m, +가 오른쪽 커브).
+    """
+
+    left_qual: int
+    left_ldw: int
+    left_position_m: float
+    left_heading_rad: float
+    left_curvature: float
+    right_qual: int
+    right_ldw: int
+    right_position_m: float
+    right_heading_rad: float
+    right_curvature: float
+    lead_detected: bool
+    lead_distance_m: float
+    lead_speed_mps: float
+    t: float
+
+
+def parse_stock_lane_geometry(
+    address: int,
+    data: bytes,
+    values: dict[str, float] | None = None,
+    event_t: float = 0.0,
+) -> StockLaneGeometry | None:
+    if address != STOCK_LANE_GEOMETRY_ADDRESS or len(data) < 28:
+        return None
+    if values is None:
+        values = decode_hyundai_canfd_dbc_message(address, data)
+    if not values:
+        return None
+    return StockLaneGeometry(
+        left_qual=int(values.get("LEFT_QUAL", 0.0)),
+        left_ldw=int(values.get("LEFT_LDW", 0.0)),
+        left_position_m=float(values.get("LEFT_POSITION", 0.0)),
+        left_heading_rad=float(values.get("LEFT_HEADING", 0.0)),
+        left_curvature=float(values.get("LEFT_CURVATURE", 0.0)),
+        right_qual=int(values.get("RIGHT_QUAL", 0.0)),
+        right_ldw=int(values.get("RIGHT_LDW", 0.0)),
+        right_position_m=float(values.get("RIGHT_POSITION", 0.0)),
+        right_heading_rad=float(values.get("RIGHT_HEADING", 0.0)),
+        right_curvature=float(values.get("RIGHT_CURVATURE", 0.0)),
+        lead_detected=bool(values.get("LEAD", 0.0)),
+        lead_distance_m=float(values.get("LEAD_DISTANCE", 0.0)),
+        lead_speed_mps=float(values.get("LEAD_SPEED", 0.0)),
+        t=float(event_t),
+    )
+
+
 def parse_corner_radar_message(
     address: int,
     data: bytes,
@@ -4602,7 +4744,7 @@ def hyundai_canfd_corner_dbc_signals() -> dict[int, dict[str, DbcSignalSpec]]:
         "hyundai",
         "hyundai_canfd.dbc",
     )
-    signals: dict[int, dict[str, DbcSignalSpec]] = {address: {} for address in CORNER_RADAR_DBC_MESSAGES}
+    signals: dict[int, dict[str, DbcSignalSpec]] = {address: {} for address in HYUNDAI_CANFD_DBC_MESSAGES}
     if dbc_path is None:
         return signals
     current_address: int | None = None
@@ -4618,7 +4760,7 @@ def hyundai_canfd_corner_dbc_signals() -> dict[int, dict[str, DbcSignalSpec]]:
             if match is None:
                 continue
             name, start, length, endian, sign, factor, offset = match.groups()
-            if name not in CORNER_RADAR_DBC_SIGNAL_NAMES:
+            if name not in HYUNDAI_CANFD_DBC_SIGNAL_NAMES:
                 continue
             signals[current_address][name] = DbcSignalSpec(
                 start=int(start),
@@ -4632,7 +4774,7 @@ def hyundai_canfd_corner_dbc_signals() -> dict[int, dict[str, DbcSignalSpec]]:
 
 
 def decode_hyundai_canfd_dbc_message(address: int, data: bytes) -> dict[str, float]:
-    if address not in CORNER_RADAR_DBC_MESSAGES:
+    if address not in HYUNDAI_CANFD_DBC_MESSAGES:
         return {}
     values: dict[str, float] = {}
     for name, signal in hyundai_canfd_corner_dbc_signals().get(address, {}).items():
