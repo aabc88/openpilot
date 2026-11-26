@@ -52,23 +52,6 @@ class LaneMarking:
 
 
 @dataclass(frozen=True, slots=True)
-class StockLaneLine:
-    """순정 전방 카메라(0x1B5 CCNC_0x1B5)가 보는 한쪽 차선의 클로소이드 파라미터.
-
-    position_m은 차 중심에서 선까지 거리(m, +가 오른쪽, ±2.02m에서 잘림),
-    heading_rad는 선 방향(rad), curvature는 곡률(1/m, +가 오른쪽 커브).
-    qual은 카메라 신뢰도(3이 확신, 0~1은 못 믿음), ldw는 차선 이탈 경고 중.
-    전방 거리 fwd(m)마다 횡위치는 x = position + heading*fwd + 0.5*curvature*fwd^2.
-    """
-
-    position_m: float
-    heading_rad: float
-    curvature: float
-    qual: int
-    ldw: bool
-
-
-@dataclass(frozen=True, slots=True)
 class RouteOverlay:
     video_rgba: bytes | None = None
     video_width: int = 0
@@ -421,8 +404,6 @@ class ClusterUiState:
     right_road_edge_points: tuple[ModelPathPoint, ...] = ()
     left_road_edge_lateral_shift_m: float = 0.0
     right_road_edge_lateral_shift_m: float = 0.0
-    stock_left_lane: StockLaneLine | None = None
-    stock_right_lane: StockLaneLine | None = None
     throttle: float = 0.0
     brake: float = 0.0
     model_path: tuple[ModelPathPoint, ...] = ()

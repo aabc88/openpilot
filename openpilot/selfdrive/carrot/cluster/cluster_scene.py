@@ -27,7 +27,6 @@ from cluster_config import (
     PATH_LANE_CHANGE_CURVE_START_M,
     PATH_START_M,
     GREEN,
-    PREMIUM_GOLD,
     RED,
     ROAD_CURVE_M_PER_M2,
     ROAD_FAR_M,
@@ -52,7 +51,6 @@ from cluster_models import (
     LaneMarking,
     ModelPathPoint,
     RadarPoint,
-    StockLaneLine,
     RADAR_CROSS_TRAFFIC_MIN_LATERAL_SPEED_MPS,
     RADAR_MOVING_VEHICLE_MIN_SPEED_KPH,
     radar_position_is_zero,
@@ -340,7 +338,6 @@ class ClusterScene:
     planned_path: tuple[MeshStrip, ...]
     radar_points: tuple[RadarPointMarker, ...]
     vehicles: tuple[VehicleBox, ...]
-    stock_lanes: tuple[MeshStrip, ...] = ()
 
 
 def vec3_with_x_offset(vec: Vec3, x_offset_m: float) -> Vec3:
@@ -3612,8 +3609,6 @@ SCENE_STATE_FIELDS = (
     "extra_right_lane_visible",
     "left_blindspot",
     "right_blindspot",
-    "stock_left_lane",
-    "stock_right_lane",
     "model_path",
     "route_overlay",
     "detected_vehicles",
@@ -3638,62 +3633,6 @@ SCENE_STATE_FIELDS = (
 
 def cluster_scene_state_key(state: ClusterUiState) -> tuple[object, ...]:
     return tuple(getattr(state, field) for field in SCENE_STATE_FIELDS)
-
-
-STOCK_LANE_WIDTH_PX = 5
-STOCK_LANE_BORDER_ALPHA = 205
-
-
-def stock_lane_centerline(
-    line: StockLaneLine,
-    start_m: float,
-    end_m: float,
-    steps: int,
-    height_m: float,
-) -> tuple[Vec3, ...]:
-    """순정 차선 클로소이드를 씬 중심선(Vec3 리스트)으로 바꾼다.
-
-    start_m/end_m은 씬 y 좌표(절대값, 자차 중심 4.18 기준)이고,
-    클로소이드는 차 기준 전방 거리 fwd = y - EGO_FORWARD_M로 계산한다.
-    x = position + heading*fwd + 0.5*curvature*fwd^2 (+가 오른쪽).
-    """
-    points: list[Vec3] = []
-    for scene_y in sample_range(start_m, end_m, steps):
-        fwd = scene_y - EGO_FORWARD_M
-        lateral = line.position_m + line.heading_rad * fwd + 0.5 * line.curvature * fwd * fwd
-        points.append(Vec3(lateral, scene_y, height_m))
-    return tuple(points)
-
-
-def stock_lane_strips(
-    line: StockLaneLine,
-    start_m: float,
-    end_m: float,
-    steps: int,
-) -> tuple[MeshStrip, ...]:
-    """순정 차선 한쪽을 테두리+본체 2단 스트립으로 만든다.
-
-    금색(PREMIUM_GOLD)이 기본이고, LDW 경고 중이면 빨강이다.
-    """
-    color = RED if line.ldw else PREMIUM_GOLD
-    centerline = stock_lane_centerline(line, start_m, end_m, steps, LANE_MARKING_HEIGHT_M)
-    specs = (
-        (
-            STOCK_LANE_WIDTH_PX + LANE_MARKING_BORDER_EXTRA_WIDTH_PX,
-            rgba(color, STOCK_LANE_BORDER_ALPHA),
-            LANE_MARKING_SHADOW_HEIGHT_M,
-        ),
-        (
-            STOCK_LANE_WIDTH_PX,
-            rgba(color),
-            LANE_MARKING_HEIGHT_M,
-        ),
-    )
-    groups = lane_marking_strip_groups_from_centerline(centerline, specs, "solid")
-    strips: list[MeshStrip] = []
-    for group in groups:
-        strips.extend(group)
-    return tuple(strips)
 
 
 def build_cluster_scene(
@@ -3858,19 +3797,6 @@ def build_cluster_scene(
     lane_markings = merge_mesh_strips_by_style(lane_strips)
     profile_scene_add(profile_add, "scene.build.lane_markings.merge", profile_merge)
     profile_scene_add(profile_add, "scene.build.lane_markings", profile_stage)
-
-    # 순정 카메라 차선 (0x1B5): 모델 차선과 별개로 금색으로 그린다.
-    # LDW 경고 중이면 그 쪽만 빨강. QUAL이 낮으면(2 미만) 아예 안 그린다.
-    profile_stage = profile_scene_start(profile_add)
-    stock_lane_strips_list: list[MeshStrip] = []
-    for stock_line in (state.stock_left_lane, state.stock_right_lane):
-        if stock_line is None or stock_line.qual < 2:
-            continue
-        stock_lane_strips_list.extend(
-            stock_lane_strips(stock_line, road_start_m, road_end_m, road_steps)
-        )
-    stock_lanes = tuple(stock_lane_strips_list)
-    profile_scene_add(profile_add, "scene.build.stock_lanes", profile_stage)
 
     profile_stage = profile_scene_start(profile_add)
     ego_offset = clamp(state.ego_lane_offset, -1.25, 1.25)
@@ -4037,7 +3963,6 @@ def build_cluster_scene(
         planned_path=tuple(planned_path),
         radar_points=tuple(radar_points),
         vehicles=tuple(vehicles),
-        stock_lanes=stock_lanes,
     )
     profile_scene_add(profile_add, "scene.build.pack", profile_stage)
     return scene

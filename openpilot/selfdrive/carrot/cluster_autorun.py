@@ -178,8 +178,6 @@ def _cluster_args(
         str(hud_mode),
         "--cluster-hud-encoder",
         str(configured_encoder_mode),
-        # 순정 카메라 차선(0x1B5) 등 CAN 기반 표시에 필요. 기본값은 꺼져 있음.
-        "--live-include-can",
     ]
     fps = USBGPU_DISPLAY_FPS if usbgpu_active else 10
     args.extend(["--fps", str(fps)])
