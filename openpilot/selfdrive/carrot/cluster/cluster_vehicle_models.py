@@ -2,6 +2,7 @@
 
 # The K8 PE OBJ uses width, length and height normalization in that order.
 K8_EGO_SCALE = (1.88, 5.05, 1.48)
+K8_DRIVING_EGO_SCALE = tuple(dimension * 0.85 for dimension in K8_EGO_SCALE)
 
 # Explicit families avoid matching unrelated names (for example IONIQ 6).
 EGO_MODEL_FINGERPRINTS = {

@@ -49,7 +49,7 @@ def test_only_k8_park_identity_replaces_the_driving_ego(fingerprint, name):
   ego = next(v for v in cluster_scene.build_cluster_scene(state).vehicles if not v.source)
   if name == "k8":
     assert ego.model_name == "k8"
-    assert (ego.width_m, ego.length_m, ego.height_m) == K8_EGO_SCALE
+    assert (ego.width_m, ego.length_m, ego.height_m) == pytest.approx(tuple(dimension * 0.85 for dimension in K8_EGO_SCALE))
   else:
     assert ego.model_name == "cybertruck"
     assert ego.length_m != cluster_scene.EV6_EGO_LENGTH_M
@@ -67,6 +67,13 @@ def test_k8_keeps_the_driving_model_front_bumper_anchor():
   assert k8.model_name == "k8"
   assert bumper(k8) == pytest.approx(bumper(stock))
   assert (k8.center.z - k8.height_m * 0.5) == pytest.approx(stock.center.z - stock.height_m * 0.5)
+
+
+@pytest.mark.parametrize("gear", ("P", "R"))
+def test_k8_park_and_reverse_keep_the_existing_model_scale(gear):
+  state = replace(standby_state(), onroad=True, gear_text=gear, car_fingerprint="KIA_K8_HEV_1ST_GEN")
+  ego = next(v for v in cluster_scene.build_cluster_scene(state).vehicles if not v.source)
+  assert (ego.width_m, ego.length_m, ego.height_m) == K8_EGO_SCALE
 
 
 def test_identity_changes_invalidate_scene_cache():

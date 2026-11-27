@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from statistics import median
 
-from cluster_vehicle_models import K8_EGO_SCALE, ego_model_name
+from cluster_vehicle_models import K8_DRIVING_EGO_SCALE, K8_EGO_SCALE, ego_model_name
 
 from cluster_config import (
     AMBER,
@@ -2353,50 +2353,20 @@ def radar_vehicle_box(
     )
 
 
-# 글래스 돔 세단 3박스 비율 (미리보기 buildSedanVehicle 코드 치수, 전차 1.82×4.35×1.35m 기준).
-# 소수점은 정확한 m 값을 기준 치수로 나눈 것이고, 비율이라 마커처럼 작아져도 유지됨.
-SEDAN_TRUNK_FRAC = 0.725 / 4.35      # 트렁크 덱: 길이의 16.7% (0.725m)
-SEDAN_CABIN_FRAC = 2.40 / 4.35       # 유리 캐빈: 길이의 55.2% (2.40m)
-# 후드: 나머지 28.2% (1.225m)
+SEDAN_TRUNK_FRAC = 0.132
+SEDAN_CABIN_FRAC = 0.60
 SEDAN_BELT_FRAC = 0.88 / 1.35        # 벨트라인 높이: 전체 높이의 65.2% (0.88m)
-SEDAN_GLASS_HALF_WIDTH_FRAC = 0.78 / 0.91  # 유리 캐빈 반너비: 차체 반너비의 85.7% (0.78m)
-SEDAN_WINDOW_SLOPE_FRAC = 0.50 / 2.40  # 앞/뒷유리 경사 수평 길이: 캐빈의 20.8% (각 0.50m)
-SEDAN_ROOF_FRAC = 1.40 / 2.40        # 평평한 루프: 캐빈의 58.3% (1.40m)
-SEDAN_ROOF_HALF_WIDTH_FRAC = 0.95    # 루프 반너비: 유리 반너비의 95% (폭 1.482m)
-SEDAN_PANO_LENGTH_FRAC = 1.20 / 1.40  # 파노라마 루프 글래스 길이: 루프의 85.7% (1.20m)
-SEDAN_PANO_HALF_WIDTH_FRAC = 0.78     # 파노라마 글래스 반너비: 유리 반너비의 78% (폭 1.217m)
-SEDAN_PANO_RAISE_M = 0.005            # 파노라마 글래스가 루프보다 올라오는 정도
-SEDAN_SIDE_GLASS_BOTTOM_FRAC = 0.97 / 1.35  # 옆유리 아래쪽: 높이의 71.9% (0.97m)
-SEDAN_SIDE_GLASS_TOP_FRAC = 1.28 / 1.35     # 옆유리 위쪽: 높이의 94.8% (1.28m)
+SEDAN_GLASS_HALF_WIDTH_FRAC = 0.84
+SEDAN_ROOF_WIDTH_FRAC = 0.82
+SEDAN_ROOF_LENGTH_FRAC = 0.50
 SEDAN_HOOD_DROP_FRAC = 0.08 / 1.35   # 후드 앞쪽이 벨트라인보다 낮아지는 정도 (0.08m)
-SEDAN_HOOD_NOSE_FRAC = 0.12 / 4.35   # 후드 앞 코: 길이의 2.8% (0.12m, 평면 뒤 짧게 떨어짐)
-SEDAN_HOOD_REAR_HALF_WIDTH_FRAC = 0.80 / 0.91   # 후드 뒤쪽 반너비 (0.80m)
-SEDAN_HOOD_FRONT_HALF_WIDTH_FRAC = 0.68 / 0.91  # 후드 앞쪽 반너비 (0.68m)
-SEDAN_TRUNK_REAR_HALF_WIDTH_FRAC = 0.82 / 0.91  # 트렁크 덱 뒤쪽 반너비 (0.82m)
-SEDAN_TRUNK_FRONT_HALF_WIDTH_FRAC = 0.80 / 0.91 # 트렁크 덱 앞쪽 반너비 (0.80m)
-SEDAN_B_PILLAR_HALF_FRAC = 0.03      # B필러 반너비: 캐빈 길이의 3%
-SEDAN_GLASS_OUTSET_M = 0.006         # B필러가 유리면보다 바깥으로 나오는 정도 (z-fighting 방지)
+SEDAN_WHEEL_CIRCLE = tuple((math.cos(i * math.tau / 12), math.sin(i * math.tau / 12)) for i in range(12))
 
 
 def glass_dome_sedan_geometry(
     vehicle: VehicleBox,
 ) -> tuple[tuple[tuple[Vec3, Vec3, Vec3, Vec3, Color], ...], tuple[tuple[Vec3, Vec3], ...]]:
-    """글래스 돔 세단 프리즘의 쿼드와 외곽선.
-
-    직사각형 박스 대신 3박스 세단(후드 + 유리 캐빈 + 트렁크)을 그린다.
-    치수는 미리보기 buildSedanVehicle 코드와 동일하다 (전차 1.82×4.35×1.35m 기준):
-    트렁크 0.725m / 캐빈 2.40m(뒷유리 0.50 + 루프 1.40 + 앞유리 0.50) / 후드 1.225m,
-    벨트라인 0.88m, 캐빈 폭 1.56m, 루프 중심은 차량 중심보다 0.25m 뒤,
-    파노라마 글래스 1.20m, 옆유리 z 0.97~1.28m, B필러는 루프 중심.
-    순수 기하 계산이라 raylib이 필요 없고 테스트에서 직접 검증할 수 있다.
-    반환: (쿼드들, 외곽선들). 쿼드는 (p0, p1, p2, p3, 색), 외곽선은 (시작, 끝).
-    몸통/옆면/뒷면/하이라이트/외곽 색은 VehicleBox의 색을 쓰고,
-    유리 패널은 GLASS_DOME_GLASS(차량 알파 적용)다.
-    local_y +가 차량 진행 방향(앞), local_x +가 오른쪽, z가 위다.
-    앞/뒷유리 폭 테이퍼(아래 1.435m -> 위 1.373m)는 생략했다: 3cm/쪽이라 뒤에서
-    안 보이고, 테이퍼를 넣으면 유리 옆모서리와 A/C필러 경사 모서리가 어긋나
-    틈이 생기기 때문이다. 대신 유리는 캐빈 폭(1.56m)으로 일정하게 그린다.
-    """
+    """Build sedan panels, wheel arches, and wheels in the detected car's pose."""
     half_w = vehicle.width_m * 0.5
     half_l = vehicle.length_m * 0.5
     length = vehicle.length_m
@@ -2407,23 +2377,35 @@ def glass_dome_sedan_geometry(
     z1 = z0 + height
     z_belt = z0 + SEDAN_BELT_FRAC * height
     z_hood_front = z_belt - SEDAN_HOOD_DROP_FRAC * height
-    z_side_bottom = z0 + SEDAN_SIDE_GLASS_BOTTOM_FRAC * height
-    z_side_top = z0 + SEDAN_SIDE_GLASS_TOP_FRAC * height
-    y_trunk_end = -half_l + SEDAN_TRUNK_FRAC * length
+    body_end = 0.885 * half_l
+    y_trunk_end = -body_end + SEDAN_TRUNK_FRAC * length
     cabin_len = SEDAN_CABIN_FRAC * length
     y_cabin_end = y_trunk_end + cabin_len
-    y_roof_rear = y_trunk_end + SEDAN_WINDOW_SLOPE_FRAC * cabin_len
-    y_roof_front = y_roof_rear + SEDAN_ROOF_FRAC * cabin_len
-    y_nose_start = half_l - SEDAN_HOOD_NOSE_FRAC * length
+    y_roof_rear = y_trunk_end + 0.5 * (1.0 - SEDAN_ROOF_LENGTH_FRAC) * cabin_len
+    y_roof_front = y_roof_rear + SEDAN_ROOF_LENGTH_FRAC * cabin_len
     glass_hw = half_w * SEDAN_GLASS_HALF_WIDTH_FRAC
-    roof_hw = glass_hw * SEDAN_ROOF_HALF_WIDTH_FRAC
-    pano_hw = glass_hw * SEDAN_PANO_HALF_WIDTH_FRAC
-    roof_len = y_roof_front - y_roof_rear
-    pano_half_len = 0.5 * SEDAN_PANO_LENGTH_FRAC * roof_len
-    pillar_half = SEDAN_B_PILLAR_HALF_FRAC * cabin_len
-    y_b = (y_roof_rear + y_roof_front) * 0.5
+    roof_hw = glass_hw * SEDAN_ROOF_WIDTH_FRAC
     alpha = vehicle.body_color[3] if len(vehicle.body_color) > 3 else 255
-    glass = rgba(GLASS_DOME_GLASS, alpha)
+    matte = not vehicle.cut_in and (vehicle.primary or vehicle.body_color[:3] == GLASS_DOME_BODY)
+    if matte:
+        offset = 8 if vehicle.primary else 0
+        body = rgba((173 + offset, 172 + offset, 165 + offset), alpha)
+        side = rgba((128 + offset, 130 + offset, 128 + offset), alpha)
+        rear = rgba((147 + offset, 146 + offset, 140 + offset), alpha)
+        bumper = rgba((68, 74, 76), alpha)
+        glass = rgba((107, 109, 105), alpha)
+        side_glass = rgba((86, 91, 89), alpha)
+        roof_glass = rgba((126, 128, 121), alpha)
+        frame = rgba((160 + offset, 160 + offset, 153 + offset), alpha)
+    else:
+        body = vehicle.body_color
+        side = vehicle.side_color
+        rear = vehicle.rear_color
+        bumper = rear
+        glass = rgba(GLASS_DOME_GLASS, alpha)
+        side_glass = glass
+        roof_glass = rgba(lighten(GLASS_DOME_GLASS, 0.12), alpha)
+        frame = glass
 
     def corner(local_x: float, local_y: float, z: float) -> Vec3:
         return Vec3(
@@ -2432,194 +2414,107 @@ def glass_dome_sedan_geometry(
             z,
         )
 
-    def hood_hw_at(y: float) -> float:
-        # 후드 반너비: 뒤 0.80m -> 앞 0.68m 선형.
-        rear_hw = half_w * SEDAN_HOOD_REAR_HALF_WIDTH_FRAC
-        front_hw = half_w * SEDAN_HOOD_FRONT_HALF_WIDTH_FRAC
-        span = half_l - y_cabin_end
-        if span <= 0.0:
-            return front_hw
-        return rear_hw + (front_hw - rear_hw) * (y - y_cabin_end) / span
+    tire = rgba((51, 55, 61), alpha)
+    tread = rgba((39, 43, 49), alpha)
+    rim = rgba((169, 183, 197), alpha)
+    hub = rgba((93, 107, 121), alpha)
+    wheel_radius = min(0.246 * height, 0.19 * half_l, 0.40 * half_w)
+    arch_radius = wheel_radius * 1.18
+    axles = (-0.64 * half_l, 0.64 * half_l)
+    wheel_z = z0 + wheel_radius
+    sill_z = z0 + 0.19 * height
+    bumper_z = z0 + 0.23 * height
+    bumper_bevel = 0.055 * length
 
-    def trunk_hw_at(y: float) -> float:
-        # 트렁크 덱 반너비: 뒤 0.82m -> 앞 0.80m 선형.
-        rear_hw = half_w * SEDAN_TRUNK_REAR_HALF_WIDTH_FRAC
-        front_hw = half_w * SEDAN_TRUNK_FRONT_HALF_WIDTH_FRAC
-        span = y_trunk_end - (-half_l)
-        if span <= 0.0:
-            return front_hw
-        return rear_hw + (front_hw - rear_hw) * (y - (-half_l)) / span
+    # Station rings bevel both bumpers and open the side panels at each axle.
+    stations = {y_trunk_end, 0.0, y_cabin_end}
+    for sign in (-1, 1):
+        stations.update(sign * (body_end - bumper_bevel * f) for f in (0.0, 0.28, 0.58, 1.0))
+    for axle in axles:
+        stations.update(axle + arch_radius * f for f in (-1.0, -0.78, -0.47, 0.0, 0.47, 0.78, 1.0))
 
-    body = vehicle.body_color
-    side = vehicle.side_color
-    rear = vehicle.rear_color
-    highlight = vehicle.top_highlight
+    def body_section(y: float) -> tuple[Vec3, ...]:
+        end_ratio = clamp((abs(y) - (body_end - bumper_bevel)) / bumper_bevel, 0.0, 1.0)
+        axle_offset = min(abs(y - axle) for axle in axles)
+        fender = 1.0 - 0.045 * clamp(axle_offset / (0.21 * length), 0.0, 1.0)
+        width = half_w * (fender - end_ratio**2 * 0.16)
+        hood = clamp((y - y_cabin_end) / max(body_end - y_cabin_end, 1e-6), 0.0, 1.0)
+        top = z_belt - (z_belt - z_hood_front) * hood - 0.045 * height * end_ratio
+        opening = 0.0 if axle_offset >= arch_radius else math.sqrt(arch_radius**2 - axle_offset**2)
+        low = max(sill_z + (bumper_z - sill_z) * end_ratio, wheel_z + opening if opening else sill_z)
+        ledge = max(low, top - 0.10 * height)
+        shoulder = max(ledge, top - 0.034 * height)
+        lower_side = min(ledge, low + 0.10 * height)
+        left = ((-0.82, low), (-0.94, low), (-1, lower_side),
+                (-1, ledge), (-0.952, shoulder), (-0.844, top))
+        profile = (*left, *((-x, z) for x, z in reversed(left)))
+        return tuple(corner(x * width, y - y * end_ratio * 0.044 * abs(x)**4, z) for x, z in profile)
 
-    quads: list[tuple[Vec3, Vec3, Vec3, Vec3, Color]] = [
-        # 하체 (z0 -> 벨트라인), 네 면. 박스와 같은 감김 순서(바깥쪽이 앞면).
-        (corner(-half_w, -half_l, z0), corner(half_w, -half_l, z0),
-         corner(half_w, -half_l, z_belt), corner(-half_w, -half_l, z_belt), rear),
-        (corner(half_w, -half_l, z0), corner(half_w, half_l, z0),
-         corner(half_w, half_l, z_belt), corner(half_w, -half_l, z_belt), side),
-        (corner(half_w, half_l, z0), corner(-half_w, half_l, z0),
-         corner(-half_w, half_l, z_belt), corner(half_w, half_l, z_belt), body),
-        (corner(-half_w, half_l, z0), corner(-half_w, -half_l, z0),
-         corner(-half_w, -half_l, z_belt), corner(-half_w, half_l, z_belt), side),
-        # 트렁크 덱 (평평, 뒤 0.82m -> 앞 0.80m).
-        (corner(-trunk_hw_at(-half_l), -half_l, z_belt),
-         corner(trunk_hw_at(-half_l), -half_l, z_belt),
-         corner(trunk_hw_at(y_trunk_end), y_trunk_end, z_belt),
-         corner(-trunk_hw_at(y_trunk_end), y_trunk_end, z_belt), body),
-        # 트렁크 어깨 (덱 옆, 벨트라인) — 뚫려 보이지 않게 덮는다.
-        (corner(trunk_hw_at(-half_l), -half_l, z_belt),
-         corner(half_w, -half_l, z_belt),
-         corner(half_w, y_trunk_end, z_belt),
-         corner(trunk_hw_at(y_trunk_end), y_trunk_end, z_belt), body),
-        (corner(-half_w, -half_l, z_belt),
-         corner(-trunk_hw_at(-half_l), -half_l, z_belt),
-         corner(-trunk_hw_at(y_trunk_end), y_trunk_end, z_belt),
-         corner(-half_w, y_trunk_end, z_belt), body),
-        # 후드 평면 (벨트라인 높이, 뒤 0.80m -> 코 시작 0.69m).
-        (corner(-hood_hw_at(y_cabin_end), y_cabin_end, z_belt),
-         corner(hood_hw_at(y_cabin_end), y_cabin_end, z_belt),
-         corner(hood_hw_at(y_nose_start), y_nose_start, z_belt),
-         corner(-hood_hw_at(y_nose_start), y_nose_start, z_belt), body),
-        # 후드 앞 코 (0.12m, 벨트라인에서 앞쪽으로 0.08m 낮아짐).
-        (corner(-hood_hw_at(y_nose_start), y_nose_start, z_belt),
-         corner(hood_hw_at(y_nose_start), y_nose_start, z_belt),
-         corner(hood_hw_at(half_l), half_l, z_hood_front),
-         corner(-hood_hw_at(half_l), half_l, z_hood_front), body),
-        # 후드 어깨 — 평면 구간 (벨트라인).
-        (corner(hood_hw_at(y_cabin_end), y_cabin_end, z_belt),
-         corner(half_w, y_cabin_end, z_belt),
-         corner(half_w, y_nose_start, z_belt),
-         corner(hood_hw_at(y_nose_start), y_nose_start, z_belt), body),
-        (corner(-half_w, y_cabin_end, z_belt),
-         corner(-hood_hw_at(y_cabin_end), y_cabin_end, z_belt),
-         corner(-hood_hw_at(y_nose_start), y_nose_start, z_belt),
-         corner(-half_w, y_nose_start, z_belt), body),
-        # 후드 어깨 — 코 구간 (벨트라인에서 앞쪽으로 낮아짐).
-        (corner(hood_hw_at(y_nose_start), y_nose_start, z_belt),
-         corner(half_w, y_nose_start, z_belt),
-         corner(half_w, half_l, z_hood_front),
-         corner(hood_hw_at(half_l), half_l, z_hood_front), body),
-        (corner(-half_w, y_nose_start, z_belt),
-         corner(-hood_hw_at(y_nose_start), y_nose_start, z_belt),
-         corner(-hood_hw_at(half_l), half_l, z_hood_front),
-         corner(-half_w, half_l, z_hood_front), body),
-        # 트렁크/캐빈 사이 어깨 (유리 캐빈 옆, 벨트라인) — 뚫려 보이지 않게 덮는다.
-        (corner(glass_hw, y_trunk_end, z_belt), corner(half_w, y_trunk_end, z_belt),
-         corner(half_w, y_cabin_end, z_belt), corner(glass_hw, y_cabin_end, z_belt), body),
-        (corner(-half_w, y_trunk_end, z_belt), corner(-glass_hw, y_trunk_end, z_belt),
-         corner(-glass_hw, y_cabin_end, z_belt), corner(-half_w, y_cabin_end, z_belt), body),
-        # 유리: 루프 (평평, 폭 1.482m).
-        (corner(-roof_hw, y_roof_rear, z1), corner(roof_hw, y_roof_rear, z1),
-         corner(roof_hw, y_roof_front, z1), corner(-roof_hw, y_roof_front, z1), glass),
-        # 루프 레일 (루프 옆) — 루프(1.482m)와 캐빈 폭(1.56m) 사이를 닫는다.
-        (corner(roof_hw, y_roof_rear, z1), corner(glass_hw, y_roof_rear, z1),
-         corner(glass_hw, y_roof_front, z1), corner(roof_hw, y_roof_front, z1), body),
-        (corner(-glass_hw, y_roof_rear, z1), corner(-roof_hw, y_roof_rear, z1),
-         corner(-roof_hw, y_roof_front, z1), corner(-glass_hw, y_roof_front, z1), body),
-        # 유리: 앞유리.
-        (corner(-glass_hw, y_roof_front, z1), corner(glass_hw, y_roof_front, z1),
-         corner(glass_hw, y_cabin_end, z_belt), corner(-glass_hw, y_cabin_end, z_belt), glass),
-        # 유리: 뒷유리.
-        (corner(glass_hw, y_roof_rear, z1), corner(-glass_hw, y_roof_rear, z1),
-         corner(-glass_hw, y_trunk_end, z_belt), corner(glass_hw, y_trunk_end, z_belt), glass),
-        # 유리: 오른쪽 옆유리 (직사각형 띠, z 0.97~1.28m).
-        (corner(glass_hw, y_roof_rear, z_side_bottom),
-         corner(glass_hw, y_roof_front, z_side_bottom),
-         corner(glass_hw, y_roof_front, z_side_top),
-         corner(glass_hw, y_roof_rear, z_side_top), glass),
-        # 유리: 왼쪽 옆유리.
-        (corner(-glass_hw, y_roof_front, z_side_bottom),
-         corner(-glass_hw, y_roof_rear, z_side_bottom),
-         corner(-glass_hw, y_roof_rear, z_side_top),
-         corner(-glass_hw, y_roof_front, z_side_top), glass),
-        # 옆 패널 (오른쪽, 옆유리 아래 z 0.88~0.97m).
-        (corner(glass_hw, y_roof_rear, z_belt),
-         corner(glass_hw, y_roof_front, z_belt),
-         corner(glass_hw, y_roof_front, z_side_bottom),
-         corner(glass_hw, y_roof_rear, z_side_bottom), body),
-        # 옆 패널 (왼쪽).
-        (corner(-glass_hw, y_roof_front, z_belt),
-         corner(-glass_hw, y_roof_rear, z_belt),
-         corner(-glass_hw, y_roof_rear, z_side_bottom),
-         corner(-glass_hw, y_roof_front, z_side_bottom), body),
-        # 옆 레일 (오른쪽, 옆유리 위 z 1.28~1.35m).
-        (corner(glass_hw, y_roof_rear, z_side_top),
-         corner(glass_hw, y_roof_front, z_side_top),
-         corner(glass_hw, y_roof_front, z1),
-         corner(glass_hw, y_roof_rear, z1), body),
-        # 옆 레일 (왼쪽).
-        (corner(-glass_hw, y_roof_front, z_side_top),
-         corner(-glass_hw, y_roof_rear, z_side_top),
-         corner(-glass_hw, y_roof_rear, z1),
-         corner(-glass_hw, y_roof_front, z1), body),
-        # A필러 (오른쪽, 앞 경사 삼각형 — 네 번째 정점을 반복해 삼각형으로 그림).
-        (corner(glass_hw, y_roof_front, z_belt),
-         corner(glass_hw, y_cabin_end, z_belt),
-         corner(glass_hw, y_roof_front, z1),
-         corner(glass_hw, y_roof_front, z1), body),
-        # A필러 (왼쪽).
-        (corner(-glass_hw, y_cabin_end, z_belt),
-         corner(-glass_hw, y_roof_front, z_belt),
-         corner(-glass_hw, y_roof_front, z1),
-         corner(-glass_hw, y_roof_front, z1), body),
-        # C필러 (오른쪽, 뒤 경사 삼각형).
-        (corner(glass_hw, y_trunk_end, z_belt),
-         corner(glass_hw, y_roof_rear, z_belt),
-         corner(glass_hw, y_roof_rear, z1),
-         corner(glass_hw, y_roof_rear, z1), body),
-        # C필러 (왼쪽).
-        (corner(-glass_hw, y_roof_rear, z_belt),
-         corner(-glass_hw, y_trunk_end, z_belt),
-         corner(-glass_hw, y_roof_rear, z1),
-         corner(-glass_hw, y_roof_rear, z1), body),
-        # B필러 (오른쪽, 옆유리 띠 높이만큼, 유리면보다 살짝 바깥).
-        (corner(glass_hw + SEDAN_GLASS_OUTSET_M, y_b - pillar_half, z_side_bottom),
-         corner(glass_hw + SEDAN_GLASS_OUTSET_M, y_b + pillar_half, z_side_bottom),
-         corner(glass_hw + SEDAN_GLASS_OUTSET_M, y_b + pillar_half, z_side_top),
-         corner(glass_hw + SEDAN_GLASS_OUTSET_M, y_b - pillar_half, z_side_top), body),
-        # B필러 (왼쪽).
-        (corner(-(glass_hw + SEDAN_GLASS_OUTSET_M), y_b + pillar_half, z_side_bottom),
-         corner(-(glass_hw + SEDAN_GLASS_OUTSET_M), y_b - pillar_half, z_side_bottom),
-         corner(-(glass_hw + SEDAN_GLASS_OUTSET_M), y_b - pillar_half, z_side_top),
-         corner(-(glass_hw + SEDAN_GLASS_OUTSET_M), y_b + pillar_half, z_side_top), body),
-        # 파노라마 루프 글래스 (루프보다 0.005m 위, 루프 중심에 배치).
-        (corner(-pano_hw, y_b - pano_half_len, z1 + SEDAN_PANO_RAISE_M),
-         corner(pano_hw, y_b - pano_half_len, z1 + SEDAN_PANO_RAISE_M),
-         corner(pano_hw, y_b + pano_half_len, z1 + SEDAN_PANO_RAISE_M),
-         corner(-pano_hw, y_b + pano_half_len, z1 + SEDAN_PANO_RAISE_M), highlight),
-    ]
+    sections = [body_section(y) for y in sorted(y for y in stations if -body_end <= y <= body_end)]
+    quads: list[tuple[Vec3, Vec3, Vec3, Vec3, Color]] = []
+    panel_colors = (bumper, bumper, side, rear, body, body, body, rear, side, bumper, bumper)
+    for a, b in zip(sections, sections[1:]):
+        for i, color in enumerate(panel_colors):
+            quads.append((a[i], a[i + 1], b[i + 1], b[i], color))
+    for section, front in ((sections[0], False), (sections[-1], True)):
+        for i, color in enumerate((bumper, rear, rear, body), start=1):
+            points = (section[i], section[-i - 1], section[-i - 2], section[i + 1])
+            if front:
+                points = points[::-1]
+            quads.append((*points, color))
 
-    edges: list[tuple[Vec3, Vec3]] = [
-        # 하체 밑면 (z0).
-        (corner(-half_w, -half_l, z0), corner(half_w, -half_l, z0)),
-        (corner(half_w, -half_l, z0), corner(half_w, half_l, z0)),
-        (corner(half_w, half_l, z0), corner(-half_w, half_l, z0)),
-        (corner(-half_w, half_l, z0), corner(-half_w, -half_l, z0)),
-        # 벨트라인 (z_belt).
-        (corner(-half_w, -half_l, z_belt), corner(half_w, -half_l, z_belt)),
-        (corner(half_w, -half_l, z_belt), corner(half_w, half_l, z_belt)),
-        (corner(half_w, half_l, z_belt), corner(-half_w, half_l, z_belt)),
-        (corner(-half_w, half_l, z_belt), corner(-half_w, -half_l, z_belt)),
-        # 하체 모서리 수직선 (z0 -> z_belt).
-        (corner(-half_w, -half_l, z0), corner(-half_w, -half_l, z_belt)),
-        (corner(half_w, -half_l, z0), corner(half_w, -half_l, z_belt)),
-        (corner(half_w, half_l, z0), corner(half_w, half_l, z_belt)),
-        (corner(-half_w, half_l, z0), corner(-half_w, half_l, z_belt)),
-        # 루프 (z1, 유리 너비).
-        (corner(-glass_hw, y_roof_rear, z1), corner(glass_hw, y_roof_rear, z1)),
-        (corner(glass_hw, y_roof_rear, z1), corner(glass_hw, y_roof_front, z1)),
-        (corner(glass_hw, y_roof_front, z1), corner(-glass_hw, y_roof_front, z1)),
-        (corner(-glass_hw, y_roof_front, z1), corner(-glass_hw, y_roof_rear, z1)),
-        # 유리 경사면 옆모서리 (루프 모서리 -> 벨트라인).
-        (corner(-glass_hw, y_roof_rear, z1), corner(-glass_hw, y_trunk_end, z_belt)),
-        (corner(glass_hw, y_roof_rear, z1), corner(glass_hw, y_trunk_end, z_belt)),
-        (corner(-glass_hw, y_roof_front, z1), corner(-glass_hw, y_cabin_end, z_belt)),
-        (corner(glass_hw, y_roof_front, z1), corner(glass_hw, y_cabin_end, z_belt)),
-    ]
+    for sign in (-1, 1):
+        for axle in axles:
+            # Wheel side faces sit inside the fender, with a contrasting rim.
+            outer = sign * half_w * 0.998
+            inner = sign * half_w * 0.775
+            ring = tuple(corner(outer, axle + wheel_radius * c, wheel_z + wheel_radius * s)
+                         for c, s in SEDAN_WHEEL_CIRCLE)
+            inside = tuple(corner(inner, axle + wheel_radius * c, wheel_z + wheel_radius * s)
+                           for c, s in SEDAN_WHEEL_CIRCLE)
+            rim_ring = tuple(corner(outer, axle + 0.73 * wheel_radius * c, wheel_z + 0.73 * wheel_radius * s)
+                             for c, s in SEDAN_WHEEL_CIRCLE)
+            center = corner(outer, axle, wheel_z)
+            for i, outer_point in enumerate(ring):
+                j = (i + 1) % len(ring)
+                faces = (
+                    (outer_point, inside[i], inside[j], ring[j], tread),
+                    (outer_point, ring[j], rim_ring[j], rim_ring[i], tire),
+                    (rim_ring[i], rim_ring[j], center, center, rim if i % 2 == 0 else hub),
+                )
+                for p0, p1, p2, p3, color in faces:
+                    quads.append((p0, p1, p2, p3, color) if sign > 0 else (p3, p2, p1, p0, color))
+
+    # The roof narrows toward its crown without a separate floating panel.
+    roof_edge_z = z1 - 0.048 * height
+    xs = (-1.0, -0.86, 0.86, 1.0)
+    rear_glass_base = tuple(corner(x * glass_hw, y_trunk_end, z_belt) for x in xs)
+    front_glass_base = tuple(corner(x * glass_hw, y_cabin_end, z_belt) for x in xs)
+    rear_roof = tuple(corner(x * roof_hw, y_roof_rear, roof_edge_z if abs(x) == 1.0 else z1) for x in xs)
+    front_roof = tuple(corner(x * roof_hw, y_roof_front, roof_edge_z if abs(x) == 1.0 else z1) for x in xs)
+    for a, b, colors in (
+        (rear_glass_base, rear_roof, (frame, glass, frame)),
+        (rear_roof, front_roof, (frame, roof_glass, frame)),
+        (front_roof, front_glass_base, (frame, glass, frame)),
+    ):
+        for i, color in enumerate(colors):
+            quads.append((a[i], a[i + 1], b[i + 1], b[i], color))
+
+    for j, sign in ((0, -1), (-1, 1)):
+        # Close the sloping side windows from the wider beltline to the roof.
+        inset = 0.14
+        window_hw = glass_hw + inset * (roof_hw - glass_hw)
+        window_low_z = z_belt + inset * (roof_edge_z - z_belt)
+        rear_window = corner(sign * window_hw, y_trunk_end + inset * (y_roof_rear - y_trunk_end), window_low_z)
+        front_window = corner(sign * window_hw, y_cabin_end + inset * (y_roof_front - y_cabin_end), window_low_z)
+        sill = (rear_glass_base[j], front_glass_base[j], front_window, rear_window)
+        window = (rear_window, front_window, front_roof[j], rear_roof[j])
+        quads.append((*(sill if sign > 0 else sill[::-1]), body))
+        quads.append((*(window if sign > 0 else window[::-1]), side_glass))
+
+    edges = [
+        (a[i], b[i]) for a, b in zip(sections, sections[1:]) for i in (5, 6)
+    ] if not matte else []
     return tuple(quads), tuple(edges)
 
 
@@ -4086,7 +3981,8 @@ def build_cluster_scene(
     )
     model_name = ego_model_name(state.car_fingerprint)
     if model_name == "k8":
-        ego_vehicle = _scale_ego_vehicle_box(ego_vehicle, K8_EGO_SCALE, model_name)
+        scale = K8_EGO_SCALE if state.gear_text in ("P", "R") else K8_DRIVING_EGO_SCALE
+        ego_vehicle = _scale_ego_vehicle_box(ego_vehicle, scale, model_name)
     elif clean_ui_enabled():
         if model_name == "ev6":
             ego_vehicle = _scale_ego_vehicle_box(ego_vehicle, (EV6_EGO_WIDTH_M, EV6_EGO_LENGTH_M, EV6_EGO_HEIGHT_M), model_name)
