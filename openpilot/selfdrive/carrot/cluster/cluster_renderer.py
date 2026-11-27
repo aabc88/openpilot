@@ -4717,14 +4717,18 @@ class ClusterUiRenderer:
         def with_alpha(color: tuple[int, int, int] | tuple[int, int, int, int]) -> tuple[int, int, int, int]:
             return color[0], color[1], color[2], alpha
 
-        marker_height_m = max(0.42, vehicle.height_m * 0.45)
+        # 세단은 실차 크기로 그린다. 예전 마커 축소(0.68w×0.64l×0.45h)는
+        # 추상적인 AMBER 박스용이었는데, 세단 모양이 되자 작은 차가
+        # 장난감처럼 보여 자차 K8과 크기 차이가 이질감을 만든다.
+        # 크기는 그대로 두고 반투명(alpha)으로만 배경 차량임을 구분한다.
+        marker_height_m = vehicle.height_m
         marker_base_z = max(0.0, vehicle.center.z - vehicle.height_m * 0.5)
 
         marker_vehicle = replace(
             vehicle,
             center=Vec3(vehicle.center.x, vehicle.center.y, marker_base_z + marker_height_m * 0.5),
-            width_m=max(0.55, vehicle.width_m * 0.68),
-            length_m=max(1.05, vehicle.length_m * 0.64),
+            width_m=vehicle.width_m,
+            length_m=vehicle.length_m,
             height_m=marker_height_m,
             body_color=with_alpha(vehicle.body_color),
             side_color=with_alpha(vehicle.side_color),
