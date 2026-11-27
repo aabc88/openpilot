@@ -109,6 +109,7 @@ from cluster_scene import (
     build_cluster_scene,
     clean_ui_enabled,
     cluster_scene_state_key,
+    glass_dome_sedan_geometry,
 )
 from cluster_system_monitor import SystemStats, SystemStatsSampler
 from cluster_vehicle_models import K8_EGO_SCALE, ego_model_name
@@ -5115,67 +5116,36 @@ class ClusterUiRenderer:
         )
 
     def _draw_vehicle_box(self, vehicle: VehicleBox) -> None:
-        half_width = vehicle.width_m * 0.5
-        half_length = vehicle.length_m * 0.5
-        z0 = 0.035
-        z1 = vehicle.height_m + z0
+        """다른 차량 박스: 이제 글래스 돔 세단 프리즘으로 그린다."""
+        self._draw_vehicle_sedan(vehicle)
 
-        def corner(local_x: float, local_y: float, z: float) -> Vec3:
-            return Vec3(
-                vehicle.center.x + vehicle.right_x * local_x + vehicle.forward_x * local_y,
-                vehicle.center.y + vehicle.right_y * local_x + vehicle.forward_y * local_y,
-                z,
-            )
+    def _draw_vehicle_sedan(self, vehicle: VehicleBox) -> None:
+        """글래스 돔 세단: 직사각형 박스 대신 3박스 세단 프리즘을 그린다.
 
-        base = (
-            corner(-half_width, -half_length, z0),
-            corner(half_width, -half_length, z0),
-            corner(half_width, half_length, z0),
-            corner(-half_width, half_length, z0),
-        )
-        top = (
-            corner(-half_width, -half_length, z1),
-            corner(half_width, -half_length, z1),
-            corner(half_width, half_length, z1),
-            corner(-half_width, half_length, z1),
-        )
+        다른 차량(레이더 트랙)은 이제 AMBER 박스가 아니라 글래스 돔 세단이다.
+        기하는 cluster_scene.glass_dome_sedan_geometry에서 계산하고,
+        여기는 쿼드/외곽선만 그린다. 선두차 하얀 외곽은 그대로 유지한다.
+        """
+        quads, edges = glass_dome_sedan_geometry(vehicle)
         self._draw_vehicle_shadow(vehicle)
-        self._draw_quad(base[0], base[1], top[1], top[0], vehicle.rear_color)
-        self._draw_quad(base[1], base[2], top[2], top[1], vehicle.side_color)
-        self._draw_quad(base[2], base[3], top[3], top[2], vehicle.body_color)
-        self._draw_quad(base[3], base[0], top[0], top[3], vehicle.side_color)
-        self._draw_quad(top[0], top[1], top[2], top[3], vehicle.body_color)
-
-        inset = 0.22
-        highlight = tuple(
-            Vec3(
-                point.x + (vehicle.center.x - point.x) * inset,
-                point.y + (vehicle.center.y - point.y) * inset,
-                point.z + 0.006,
-            )
-            for point in top
-        )
-        self._draw_quad(highlight[0], highlight[1], highlight[2], highlight[3], vehicle.top_highlight)
-
+        for p0, p1, p2, p3, color in quads:
+            self._draw_quad(p0, p1, p2, p3, color)
         outline = rl_color(vehicle.outline_color)
-        edge_points = base + top
-        edges = (
-            (0, 1),
-            (1, 2),
-            (2, 3),
-            (3, 0),
-            (4, 5),
-            (5, 6),
-            (6, 7),
-            (7, 4),
-            (0, 4),
-            (1, 5),
-            (2, 6),
-            (3, 7),
-        )
         for start, end in edges:
-            rl.draw_line_3d(vec3(edge_points[start]), vec3(edge_points[end]), outline)
+            rl.draw_line_3d(vec3(start), vec3(end), outline)
         if vehicle.primary or vehicle.cut_in:
+            half_width = vehicle.width_m * 0.5
+            half_length = vehicle.length_m * 0.5
+            z0 = 0.035
+            z1 = vehicle.height_m + z0
+
+            def corner(local_x: float, local_y: float, z: float) -> Vec3:
+                return Vec3(
+                    vehicle.center.x + vehicle.right_x * local_x + vehicle.forward_x * local_y,
+                    vehicle.center.y + vehicle.right_y * local_x + vehicle.forward_y * local_y,
+                    z,
+                )
+
             self._draw_selected_vehicle_outline(vehicle, corner, half_width, half_length, z0, z1)
 
     def _draw_selected_vehicle_outline(
