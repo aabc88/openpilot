@@ -77,11 +77,11 @@ def test_freshness_and_vehicle_alert_precedence(monkeypatch, tmp_path):
   for name in ('rl_push_matrix', 'rl_pop_matrix', 'rl_scalef'):
     monkeypatch.setattr(hud.rl, name, lambda *a: None)
   monkeypatch.setattr(hud.rl, 'draw_rectangle', lambda *a: calls.append('strip'))
-  monkeypatch.setattr(hud.ClusterUiRenderer, '_draw_alert_overlay', lambda *a: calls.append('vehicle'))
+  monkeypatch.setattr(hud.ClusterUiRenderer, '_draw_alert_overlay', lambda *a, full_width: calls.append(('vehicle', full_width)))
   renderer._draw_text = lambda *a, **kw: calls.append('text')
   renderer._ellipsize_text = lambda text, *a: text
-  renderer._draw_alert_overlay(NS(size=3, text1='TAKE OVER', text2=''))
-  assert calls == ['vehicle']
+  renderer._draw_alert_overlay(NS(size=3, text1='TAKE OVER', text2=''), full_width=True)
+  assert calls == [('vehicle', True)]
   calls.clear()
   renderer._draw_alert_overlay(None)
-  assert calls == ['strip', 'text', 'vehicle']
+  assert calls == ['strip', 'text', ('vehicle', False)]

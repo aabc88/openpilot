@@ -246,6 +246,7 @@ class VehicleBox:
     annotate: bool = False
     model_key: int = -1  # Radar track id (stable surrounding model choice)
     model_name: str = "cybertruck"
+    road_aligned: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -350,6 +351,12 @@ def vehicle_box_with_x_offset(vehicle: VehicleBox, x_offset_m: float) -> Vehicle
     if abs(x_offset_m) <= 0.0001:
         return vehicle
     return replace(vehicle, center=vec3_with_x_offset(vehicle.center, x_offset_m))
+
+
+def vehicle_box_with_road_heading(vehicle: VehicleBox, heading_rad: float) -> VehicleBox:
+    forward_x, forward_y = math.sin(heading_rad), math.cos(heading_rad)
+    return replace(vehicle, forward_x=forward_x, forward_y=forward_y, right_x=forward_y, right_y=-forward_x,
+                   road_aligned=True)
 
 
 def rgba(color: tuple[int, int, int], alpha: int = 255) -> Color:
@@ -494,6 +501,57 @@ def model_line_lateral_at_forward(
             return previous.lateral_m + (point.lateral_m - previous.lateral_m) * amount + lateral_shift_m
         previous = point
     return None
+
+
+def surround_vehicle_heading(
+    vehicle: VehicleBox, state: ClusterUiState, longitudinal_scale: float,
+) -> VehicleBox:
+    """Align the car with a chord spanning its wheelbase in the rendered lane."""
+    if (not vehicle.source or vehicle.source == "carState" or vehicle.cut_in
+            or vehicle.longitudinal_m is None or vehicle.longitudinal_m <= 0.0
+            or vehicle.forward_y <= 0.0
+            or (vehicle.absolute_speed_kph is not None and vehicle.absolute_speed_kph < 0.0)):
+        return vehicle
+
+    forward_m = render_relative_forward_m_from_scene(vehicle.center.y, longitudinal_scale)
+    lane_width_m = clamp(state.lane_width_m or DEFAULT_LANE_WIDTH_M, 2.4, 4.6)
+    half_wheelbase_m = vehicle.length_m * 0.30 / longitudinal_scale
+    nearby_lines: list[tuple[float, float]] = []
+    for marking in state.lanes:
+        points = marking.model_points
+        if not marking.visible or len(points) < 2 or not points[0].forward_m <= forward_m <= points[-1].forward_m:
+            continue
+        near_m = max(points[0].forward_m, forward_m - half_wheelbase_m)
+        far_m = min(points[-1].forward_m, forward_m + half_wheelbase_m)
+        if far_m - near_m < 2.0:
+            continue
+        lane_x = model_line_lateral_at_forward(points, forward_m, marking.model_lateral_shift_m)
+        near_x = model_line_lateral_at_forward(points, near_m)
+        far_x = model_line_lateral_at_forward(points, far_m)
+        if lane_x is None or near_x is None or far_x is None or not all(map(math.isfinite, (lane_x, near_x, far_x))):
+            continue
+        offset = lane_x - vehicle.center.x
+        if abs(offset) < lane_width_m:
+            slope = (far_x - near_x) / ((far_m - near_m) * longitudinal_scale)
+            nearby_lines.append((offset, slope))
+
+    if not nearby_lines:
+        return vehicle
+
+    left = max((line for line in nearby_lines if line[0] <= 0.0), default=None)
+    right = min((line for line in nearby_lines if line[0] >= 0.0), default=None)
+    if left is not None and right is not None and right[0] - left[0] > 0.01:
+        fraction = -left[0] / (right[0] - left[0])
+        lane_heading = math.atan(left[1] + (right[1] - left[1]) * fraction)
+        weight = 1.0
+    else:
+        offset, slope = min(nearby_lines, key=lambda line: abs(line[0]))
+        lane_heading = math.atan(slope)
+        # When only one lane boundary is nearby, gradually trust it less farther from it.
+        weight = clamp(2.0 * (1.0 - abs(offset) / lane_width_m), 0.0, 1.0)
+
+    heading = math.atan2(vehicle.forward_x, vehicle.forward_y)
+    return vehicle_box_with_road_heading(vehicle, heading + (lane_heading - heading) * weight)
 
 
 def strip_between_model_lines(
@@ -1562,6 +1620,31 @@ def model_path_centerline(
             for point in model_points
         ]
     return tuple(points) if len(points) >= 2 else ()
+
+
+def surround_path_strips(
+    state: ClusterUiState,
+    lane_width_m: float,
+    blockers: tuple[PathBlocker, ...],
+    theme: ClusterTheme,
+) -> tuple[MeshStrip, ...]:
+    points = tuple(point for point in model_path_centerline(state, lane_width_m, blockers)
+                   if point.y <= PATH_START_M + 20.0)
+    if len(points) < 2 or points[-1].y <= points[0].y:
+        return ()
+    color = theme.path_body if state.lfa_active else (148, 150, 153, 120)
+    strip = strip_from_centerline(points, 1.35, color)
+    span = points[-1].y - points[0].y
+
+    def taper(edge: tuple[Vec3, ...]) -> tuple[Vec3, ...]:
+        result = []
+        for point, center in zip(edge, points, strict=True):
+            width = 1.0 - 0.78 * (center.y - points[0].y) / span
+            result.append(Vec3(center.x + (point.x - center.x) * width,
+                               center.y + (point.y - center.y) * width, point.z))
+        return tuple(result)
+
+    return (replace(strip, left=taper(strip.left), right=taper(strip.right)),)
 
 
 def planned_path_strips(
@@ -3809,6 +3892,8 @@ def build_cluster_scene(
     profile_add: ProfileAdd | None = None,
     highlight_lane_lit: bool = True,
     theme: ClusterTheme = LIGHT_CLUSTER_THEME,
+    *,
+    surround: bool = False,
 ) -> ClusterScene:
     profile_stage = profile_scene_start(profile_add)
     lane_width_m = max(2.4, min(4.6, state.lane_width_m or DEFAULT_LANE_WIDTH_M))
@@ -3857,6 +3942,8 @@ def build_cluster_scene(
     relative_scene_x_offset_m = -scene_shift_x_m
     radar_vehicle_x_offset_m = relative_scene_x_offset_m
     camera = scene_camera(state, lane_width_m, anchor_x_m)
+    if surround and not state.surround_view_active:
+        camera = CameraSpec(Vec3(0.0, -9.3, 6.2), Vec3(0.0, 10.0, 0.0), 34.0)
     camera_active = state.surround_view_active
     selected_radar_vehicle_points = radar_vehicle_points(state, lane_width_m)
     selected_radar_vehicle_boxes = tuple(
@@ -3911,6 +3998,11 @@ def build_cluster_scene(
     for marking in state.lanes:
         if not marking.visible:
             continue
+        marking_color = lane_marking_color_for_state(marking, bsd_marking_offsets)
+        marking_alpha = 255
+        if surround and (marking_color in (BLUE, BLUE_SOFT) or max(marking_color) - min(marking_color) <= 18):
+            marking_color = (171, 173, 177) if theme.is_dark else (236, 232, 225)
+            marking_alpha = 153 if theme.is_dark else 176
         marking_specs = (
             (
                 marking.width + LANE_MARKING_BORDER_EXTRA_WIDTH_PX,
@@ -3919,7 +4011,7 @@ def build_cluster_scene(
             ),
             (
                 marking.width,
-                rgba(lane_marking_color_for_state(marking, bsd_marking_offsets)),
+                rgba(marking_color, marking_alpha),
                 LANE_MARKING_HEIGHT_M,
             ),
         )
@@ -4073,6 +4165,19 @@ def build_cluster_scene(
             vehicle_box_with_x_offset(vehicle, radar_vehicle_x_offset_m)
             for vehicle in visible_radar_vehicle_boxes_raw
         )
+        if surround:
+            detected_vehicle_boxes = tuple(
+                surround_vehicle_heading(box, state, longitudinal_scale)
+                if (detected.lateral_speed_mps is None
+                    or abs(detected.lateral_speed_mps) < RADAR_CROSS_TRAFFIC_MIN_LATERAL_SPEED_MPS)
+                else box
+                for detected, box in zip(render_detected_vehicles, detected_vehicle_boxes, strict=True)
+            )
+            visible_radar_vehicle_boxes = tuple(
+                box if radar_point_is_cross_traffic(point, corner_lateral_speed_offset_mps)
+                else surround_vehicle_heading(box, state, longitudinal_scale)
+                for point, box in zip(visible_radar_vehicle_points, visible_radar_vehicle_boxes, strict=True)
+            )
         blockers = (*detected_blockers, *radar_blockers)
         scene_vehicles = (*detected_vehicle_boxes, *visible_radar_vehicle_boxes)
         vehicles = (ego_vehicle, *scene_vehicles) if show_ego_vehicle else scene_vehicles
@@ -4095,7 +4200,10 @@ def build_cluster_scene(
     profile_scene_add(profile_add, "scene.build.road_edges", profile_stage)
 
     profile_stage = profile_scene_start(profile_add)
-    planned_path = planned_path_strips(state, lane_width_m, blockers, theme, profile_add)
+    if surround:
+        planned_path = surround_path_strips(state, lane_width_m, blockers, theme)
+    else:
+        planned_path = planned_path_strips(state, lane_width_m, blockers, theme, profile_add)
     profile_scene_add(profile_add, "scene.build.planned_path", profile_stage)
 
     profile_stage = profile_scene_start(profile_add)

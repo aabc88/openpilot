@@ -1,4 +1,5 @@
 """Cluster vehicle identity, gear transitions, dormant driving UI and GPU ownership."""
+import math
 from dataclasses import replace
 from pathlib import Path
 import sys
@@ -11,7 +12,9 @@ sys.path.insert(0, str(CLUSTER))
 
 import cluster_renderer as renderer_module
 import cluster_scene
+from cluster_config import CLUSTER_CAMERA_VIEW_MODE_ROAD_CAMERA, CLUSTER_SCREEN_MODE_SURROUND
 from cluster_live import standby_state
+from cluster_models import DetectedVehicle, LaneMarking, ModelPathPoint
 from cluster_renderer import ClusterUiRenderer
 from cluster_route_replay import RouteLogParser, frame_to_state
 from cluster_vehicle_models import EGO_MODEL_FINGERPRINTS, K8_EGO_SCALE, ego_model_name
@@ -82,7 +85,7 @@ def test_identity_changes_invalidate_scene_cache():
   assert cluster_scene.cluster_scene_state_key(first) != cluster_scene.cluster_scene_state_key(second)
 
 
-@pytest.mark.parametrize("screen_mode", range(-1, 8))
+@pytest.mark.parametrize("screen_mode", range(-1, CLUSTER_SCREEN_MODE_SURROUND + 1))
 def test_gear_transitions_restore_selected_mode_and_keep_alerts(monkeypatch, screen_mode):
   from openpilot.common import indicator_display
 
@@ -94,7 +97,7 @@ def test_gear_transitions_restore_selected_mode_and_keep_alerts(monkeypatch, scr
     monkeypatch.setattr(renderer, method, lambda *_, label=label: calls.append(label))
   monkeypatch.setattr(indicator_display, "draw", lambda *_: calls.append("indicator"))
   alert = object()
-  monkeypatch.setattr(renderer, "_draw_alert_overlay", lambda value: calls.append(value))
+  monkeypatch.setattr(renderer, "_draw_alert_overlay", lambda value, *, full_width: calls.append((value, full_width)))
   world = "clear" if screen_mode in (renderer_module.CLUSTER_SCREEN_MODE_DEBUG_GRAPH,
                                     renderer_module.CLUSTER_SCREEN_MODE_NAVI) else "world"
   for gear, onroad in (("D", True), ("P", True), ("R", True), ("D", True), ("N", True),
@@ -103,8 +106,91 @@ def test_gear_transitions_restore_selected_mode_and_keep_alerts(monkeypatch, scr
     state = replace(standby_state(), onroad=onroad, gear_text=gear, alert=alert)
     renderer.render(state, signal_lights=(False, False))
     expected = [gear] if onroad and gear in ("P", "R") else [world, "hud"]
-    assert calls == [*expected, "indicator", alert]
+    full_width = screen_mode == CLUSTER_SCREEN_MODE_SURROUND and expected == ["world", "hud"]
+    assert calls == [*expected, "indicator", (alert, full_width)]
     assert renderer.screen_mode == screen_mode
+
+
+def test_surround_uses_the_live_scene_and_a_short_model_path():
+  state = replace(
+    standby_state(), onroad=True, gear_text="D", car_fingerprint="KIA_K8_HEV_1ST_GEN", lfa_active=True,
+    model_path=tuple(ModelPathPoint(float(x), 0.0) for x in range(0, 60, 2)),
+    detected_vehicles=(DetectedVehicle("L1", 19.0, 0.0, primary=True),),
+  )
+  normal = cluster_scene.build_cluster_scene(state)
+  surround = cluster_scene.build_cluster_scene(state, surround=True)
+  assert surround.vehicles == normal.vehicles
+  assert surround.camera != normal.camera
+  (ribbon,) = surround.planned_path
+  assert ribbon.left[-1].y < next(v.center.y for v in surround.vehicles if v.primary)
+  assert ribbon.right[-1].x - ribbon.left[-1].x < ribbon.right[0].x - ribbon.left[0].x
+  assert not cluster_scene.build_cluster_scene(replace(state, model_path=()), surround=True).planned_path
+
+
+def test_surround_preserves_an_explicit_road_camera_selection():
+  renderer = ClusterUiRenderer(screen_mode=CLUSTER_SCREEN_MODE_SURROUND)
+  state = replace(standby_state(), onroad=True, gear_text="D")
+  assert renderer._effective_screen_mode(state) == CLUSTER_SCREEN_MODE_SURROUND
+  assert renderer._effective_screen_mode(replace(state, camera_view_mode=CLUSTER_CAMERA_VIEW_MODE_ROAD_CAMERA)) != CLUSTER_SCREEN_MODE_SURROUND
+
+
+@pytest.mark.parametrize("bend", (-1, 0, 1))
+def test_surround_car_heading_follows_each_part_of_a_curve(bend):
+  def lateral(forward_m):
+    return bend * 0.004 * forward_m ** 2
+
+  lanes = tuple(
+    LaneMarking(offset, model_points=tuple(
+      ModelPathPoint(x, lateral(x) + offset * 3.6) for x in range(0, 61, 4)
+    ))
+    for offset in (-1.5, -0.5, 0.5, 1.5)
+  )
+  detected = (
+    DetectedVehicle("near", 9.0, lateral(9.0), absolute_speed_kph=60.0),
+    DetectedVehicle("far", 25.0, lateral(25.0) + 3.6, absolute_speed_kph=60.0),
+    DetectedVehicle("oncoming", 20.0, lateral(20.0) - 3.6, absolute_speed_kph=-60.0),
+    DetectedVehicle("crossing", 16.0, lateral(16.0) - 3.6, absolute_speed_kph=30.0, lateral_speed_mps=2.5),
+    DetectedVehicle("cut-in", 15.0, lateral(15.0), cut_in=True),
+  )
+  state = replace(standby_state(), lanes=lanes, lane_width_m=3.6, detected_vehicles=detected)
+  normal = cluster_scene.build_cluster_scene(state)
+  surround = cluster_scene.build_cluster_scene(state, surround=True)
+  assert surround.vehicles[0] == normal.vehicles[0]
+  original = {vehicle.label: vehicle for vehicle in normal.vehicles[1:]}
+  turned = {vehicle.label: vehicle for vehicle in surround.vehicles[1:]}
+  assert original.keys() == turned.keys()
+
+  def angle(vehicle):
+    return math.degrees(math.atan2(vehicle.forward_x, vehicle.forward_y))
+
+  near_angle = angle(turned["near"])
+  far_angle = angle(turned["far"])
+  if bend == 0:
+    assert near_angle == far_angle == 0.0
+  else:
+    assert near_angle == pytest.approx(bend * 8.2, abs=0.4)
+    assert far_angle == pytest.approx(bend * 21.8, abs=0.4)
+  assert all(turned[label].center == original[label].center for label in original)
+  for label in ("oncoming", "crossing", "cut-in"):
+    assert turned[label] == original[label]
+
+
+def test_surround_heading_eases_updates_for_the_same_track():
+  state = replace(standby_state(), detected_vehicles=(DetectedVehicle("L1", 19.0, 0.0, primary=True),))
+  vehicle = cluster_scene.build_cluster_scene(state).vehicles[1]
+  straight = cluster_scene.vehicle_box_with_road_heading(vehicle, 0.0)
+  turn = cluster_scene.vehicle_box_with_road_heading(vehicle, math.radians(26.0))
+  renderer = ClusterUiRenderer(screen_mode=CLUSTER_SCREEN_MODE_SURROUND)
+
+  assert renderer._surround_display_vehicles((straight,), now=1.0) == [straight]
+  (entering,) = renderer._surround_display_vehicles((turn,), now=1.08)
+  (in_curve,) = renderer._surround_display_vehicles((turn,), now=1.30)
+  assert 0.0 < entering.forward_x < in_curve.forward_x < turn.forward_x
+  assert entering.center == in_curve.center == vehicle.center
+
+  # A vanished or differently identified target starts at its own configured angle.
+  assert renderer._surround_display_vehicles((), now=1.32) == []
+  assert renderer._surround_display_vehicles((turn,), now=1.36) == [turn]
 
 
 @pytest.mark.parametrize("gear,onroad", [("D", True), ("N", True), ("L", True), ("", True), ("P", False), ("R", False)])

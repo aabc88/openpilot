@@ -62,7 +62,7 @@ class HealthRenderer(ClusterUiRenderer):
     # The normal status row's transform also follows left/right panel swaps.
     self._temperature_badge(EGPU_STATUS_CENTER_X + 20, TOP_STATUS_CENTER_Y)
 
-  def _draw_alert_overlay(self, alert):
+  def _draw_alert_overlay(self, alert, *, full_width=False):
     rl.rl_push_matrix()
     rl.rl_scalef(self.width / DESIGN_WIDTH, self.height / DESIGN_HEIGHT, 1.)
     try:
@@ -78,4 +78,4 @@ class HealthRenderer(ClusterUiRenderer):
     finally:
       rl.rl_pop_matrix()
     # Vehicle alerts remain last and take precedence over the health strip.
-    super()._draw_alert_overlay(alert)
+    super()._draw_alert_overlay(alert, full_width=full_width)

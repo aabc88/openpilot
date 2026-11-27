@@ -54,6 +54,7 @@ from cluster_config import (
     CLUSTER_SCREEN_MODE_NAVI,
     CLUSTER_SCREEN_MODE_NAV_MODEL,
     CLUSTER_SCREEN_MODE_PREMIUM,
+    CLUSTER_SCREEN_MODE_SURROUND,
     CLUSTER_SCREEN_MODE_TRIP_REPORT,
     CLUSTER_SCREEN_MODE_DEFAULT,
     CLUSTER_SCREEN_MODE_DEBUG_SYSTEM,
@@ -61,10 +62,12 @@ from cluster_config import (
     PREMIUM_CLUSTER_THEME,
     PREMIUM_GOLD,
     ClusterTheme,
+    DARK_CLUSTER_THEME,
     DESIGN_HEIGHT,
     DESIGN_WIDTH,
     EGO_FORWARD_M,
     GREEN,
+    LIGHT_CLUSTER_THEME,
     MAX_ACCEL_MPS2,
     MAX_SPEED_KPH,
     RADAR_TO_CAMERA_M,
@@ -110,8 +113,10 @@ from cluster_scene import (
     clean_ui_enabled,
     cluster_scene_state_key,
     glass_dome_sedan_geometry,
+    vehicle_box_with_road_heading,
 )
 from cluster_system_monitor import SystemStats, SystemStatsSampler
+from cluster_surround_hud import draw_surround_hud
 from cluster_vehicle_models import K8_EGO_SCALE, ego_model_name
 from cluster_utils import blink_visible, clamp
 
@@ -507,6 +512,26 @@ GROUND_HALF_WIDTH_M = 160.0
 GROUND_Z_M = -0.03
 GROUND_ROWS_M = (-60.0, 0.0, 20.0, 40.0, 55.0, 70.0, 82.0, 92.0)
 GROUND_FADE = (0.0, 0.0, 0.0, 0.18, 0.42, 0.70, 0.90, 1.0)
+SURROUND_LIGHT_THEME = replace(
+    LIGHT_CLUSTER_THEME,
+    bg=(175, 172, 167),
+    road=(151, 148, 144),
+    road_edge=(161, 158, 154),
+    lane_marking_border=(150, 146, 142, 0),
+    path_body=(92, 166, 221, 158),
+)
+SURROUND_DARK_THEME = replace(
+    DARK_CLUSTER_THEME,
+    bg=(35, 36, 39),
+    road=(53, 53, 55),
+    road_edge=(69, 69, 73),
+    lane_marking_border=(44, 44, 47, 0),
+    path_body=(68, 131, 188, 146),
+)
+SURROUND_SHADOW_RING = tuple(
+    (math.cos(angle * math.tau / 12), math.sin(angle * math.tau / 12))
+    for angle in range(12)
+)
 OTHER_VEHICLE_PAINT_RGB = (128, 136, 146)  # EV6 HUD patch v4: gunmetal grey body (assets/models/others)
 SIDE_VEHICLE_MODEL_SOURCES = ("liveTracks", "cornerRadar")
 SIDE_VEHICLE_MODEL_MIN_CONFIDENCE = 0.80  # below this the original small marker box is kept
@@ -1316,6 +1341,7 @@ class ClusterUiRenderer:
         self._vehicle_shaders: list[tuple[object, int]] = []
         self._scene_cache_key: tuple[object, ...] | None = None
         self._scene_cache: ClusterScene | None = None
+        self._surround_vehicle_poses: dict[tuple[str, int | str], tuple[float, Vec3, float]] = {}
         self._speed_bg_texture = None
         self._traffic_red_texture = None
         self._traffic_green_texture = None
@@ -1738,6 +1764,7 @@ class ClusterUiRenderer:
         self._vehicle_model_load_attempted = False
         self._scene_cache_key = None
         self._scene_cache = None
+        self._surround_vehicle_poses.clear()
         self._camera_overlay_strip_points = None
         self._camera_overlay_strip_point_capacity = 0
         self._camera_overlay_strip_pair_visibility = bytearray()
@@ -1885,11 +1912,13 @@ class ClusterUiRenderer:
 
     def render(self, state: ClusterUiState, signal_lights: tuple[bool, bool] | None = None) -> None:
         """Draw one frame into the currently active raylib render target."""
+        surround = False
         if self._ev6_park_screen_active(state):  # EV6 HUD patch v13: parked screen replaces the road view in P
             self._ev6_draw_park_screen(state)
         elif self._ev6_reverse_screen_active(state):
             self._ev6_draw_reverse_screen(state)
         else:
+            surround = self._effective_screen_mode(state) == CLUSTER_SCREEN_MODE_SURROUND
             if signal_lights is None:
                 signal_lights = self._turn_signal_lights(state)
             profile_stage = self._profile_start()
@@ -1901,10 +1930,12 @@ class ClusterUiRenderer:
             profile_stage = self._profile_start()
             self._draw_hud(state, signal_lights)
             self._profile_add("render.hud", profile_stage)
+        if not surround:
+            self._surround_vehicle_poses.clear()
         profile_stage = self._profile_start()
         from openpilot.common.indicator_display import draw as draw_indicator
         draw_indicator(530, 78, 460, self._korean_font or self._font, 24)
-        self._draw_alert_overlay(getattr(state, "alert", None))
+        self._draw_alert_overlay(getattr(state, "alert", None), full_width=surround)
         self._profile_add("render.alert", profile_stage)
 
     def _draw_nav_model_map(self):
@@ -2693,8 +2724,11 @@ class ClusterUiRenderer:
         if not cluster_camera_view_is_road_camera(state.camera_view_mode) or not state.onroad:
             self._close_live_road_camera()
         theme = self._current_theme()
+        surround = self._effective_screen_mode(state) == CLUSTER_SCREEN_MODE_SURROUND
+        if surround:
+            theme = SURROUND_DARK_THEME if theme.is_dark else SURROUND_LIGHT_THEME
         profile_stage = self._profile_start()
-        scene = self._scene_for_state(state, self._highlight_lane_lit(state, signal_lights), theme)
+        scene = self._scene_for_state(state, self._highlight_lane_lit(state, signal_lights), theme, surround=surround)
         self._profile_add("render_world.build_scene", profile_stage)
         profile_stage = self._profile_start()
         rl.clear_background(rl_color(theme.bg))
@@ -2711,7 +2745,7 @@ class ClusterUiRenderer:
         else:
             self._camera_overlay_wide = False
             profile_stage = self._profile_start()
-            self._draw_scene(scene, state)
+            self._draw_scene(scene, state, surround_theme=theme if surround else None)
             self._profile_add("render_world.draw_scene", profile_stage)
 
     def _scene_for_state(
@@ -2719,8 +2753,12 @@ class ClusterUiRenderer:
         state: ClusterUiState,
         highlight_lane_lit: bool,
         theme: ClusterTheme,
+        *,
+        surround: bool = False,
     ) -> ClusterScene:
         cache_key = (*cluster_scene_state_key(state), highlight_lane_lit, theme, clean_ui_enabled())
+        if surround:
+            cache_key = (*cache_key, surround, state.lfa_active)
         if ego_model_name(state.car_fingerprint) == "k8":
             k8_available = self._k8_vehicle_model is not None
             cache_key = (*cache_key, k8_available)
@@ -2733,6 +2771,7 @@ class ClusterUiRenderer:
             self._profile_add_elapsed if self.profile_enabled else None,
             highlight_lane_lit=highlight_lane_lit,
             theme=theme,
+            surround=surround,
         )
         self._scene_cache_key = cache_key
         self._scene_cache = scene
@@ -4328,7 +4367,32 @@ class ClusterUiRenderer:
         rl.ffi.memmove(data, raw, len(raw))
         return data
 
-    def _draw_scene(self, scene: ClusterScene, state: ClusterUiState) -> None:
+    def _surround_display_vehicles(self, vehicles: tuple[VehicleBox, ...], now: float | None = None) -> list[VehicleBox]:
+        now = time.monotonic() if now is None else now
+        current_poses = {}
+        displayed = []
+        for vehicle in vehicles:
+            track = vehicle.model_key if vehicle.model_key >= 0 else vehicle.label
+            if vehicle.road_aligned and track != "":
+                key = (vehicle.source, track)
+                heading = math.atan2(vehicle.forward_x, vehicle.forward_y)
+                previous = self._surround_vehicle_poses.get(key)
+                if previous is not None:
+                    last_time, last_center, last_heading = previous
+                    elapsed = now - last_time
+                    if (0.0 <= elapsed < 0.6
+                            and abs(vehicle.center.x - last_center.x) < 2.75
+                            and abs(vehicle.center.y - last_center.y) < 5.5):
+                        # Smooth consecutive poses without tying the response to the render frame rate.
+                        blend = -math.expm1(-elapsed / 0.16)
+                        heading = last_heading + (heading - last_heading) * blend
+                        vehicle = vehicle_box_with_road_heading(vehicle, heading)
+                current_poses[key] = (now, vehicle.center, heading)
+            displayed.append(vehicle)
+        self._surround_vehicle_poses = current_poses
+        return displayed
+
+    def _draw_scene(self, scene: ClusterScene, state: ClusterUiState, *, surround_theme: ClusterTheme | None = None) -> None:
         camera = rl.Camera3D(
             vec3(scene.camera.position),
             vec3(scene.camera.target),
@@ -4356,8 +4420,8 @@ class ClusterUiRenderer:
         if abs(scene.scene_shift_x_m) > 0.0001:
             rl.rl_translatef(scene.scene_shift_x_m, 0.0, 0.0)
         try:
-            if clean_ui_enabled():
-                self._draw_ground()  # EV6 HUD patch v5
+            if surround_theme is not None or clean_ui_enabled():
+                self._draw_ground(surround_theme)
             profile_stage = self._profile_start()
             for strip in scene.highlight_lanes:
                 self._draw_strip(strip)
@@ -4368,6 +4432,8 @@ class ClusterUiRenderer:
             self._profile_add("draw_scene.road_edges", profile_stage)
             profile_stage = self._profile_start()
             for strip in scene.lane_markings:
+                if surround_theme is not None and strip.color == surround_theme.lane_marking_border:
+                    continue
                 self._draw_strip(strip)
             self._profile_add("draw_scene.lane_markings", profile_stage)
             profile_stage = self._profile_start()
@@ -4381,13 +4447,14 @@ class ClusterUiRenderer:
                 self._draw_strip(strip)
             self._profile_add("draw_scene.planned_path", profile_stage)
             profile_stage = self._profile_start()
-            if not clean_ui_enabled():  # EV6 HUD patch v6
+            if surround_theme is None and not clean_ui_enabled():  # EV6 HUD patch v6
                 for point in scene.radar_points:
                     self._draw_radar_point(point)
             self._profile_add("draw_scene.radar_points", profile_stage)
             profile_stage = self._profile_start()
-            for vehicle in scene.vehicles:
-                self._draw_vehicle(vehicle)
+            vehicles = scene.vehicles if surround_theme is None else self._surround_display_vehicles(scene.vehicles)
+            for vehicle in vehicles:
+                self._draw_vehicle(vehicle, surround=surround_theme is not None)
             self._profile_add("draw_scene.vehicles", profile_stage)
         finally:
             rl.rl_pop_matrix()
@@ -4396,6 +4463,11 @@ class ClusterUiRenderer:
         self._profile_add("draw_scene.end_mode_3d", profile_stage)
         if abs(scene_offset_x) > 0.001:
             rl.rl_viewport(0, 0, self.width, self.height)
+        if surround_theme is not None:
+            cut_ins = tuple(vehicle for vehicle in scene.vehicles if vehicle.cut_in)
+            self._draw_vehicle_badges(cut_ins, camera, scene.scene_shift_x_m, CLUSTER_RADAR_INFO_NONE)
+            return
+        if abs(scene_offset_x) > 0.001:
             rl.rl_push_matrix()
             rl.rl_translatef(scene_offset_x, 0.0, 0.0)
         try:
@@ -4420,10 +4492,10 @@ class ClusterUiRenderer:
             if abs(scene_offset_x) > 0.001:
                 rl.rl_pop_matrix()
 
-    def _draw_ground(self) -> None:
+    def _draw_ground(self, surround_theme: ClusterTheme | None = None) -> None:
         # Flat ground plane that fades into the background colour towards the horizon.
-        theme = self._current_theme()
-        near = GROUND_DARK_RGB if theme.is_dark else GROUND_LIGHT_RGB
+        theme = surround_theme or self._current_theme()
+        near = theme.road if surround_theme is not None else GROUND_DARK_RGB if theme.is_dark else GROUND_LIGHT_RGB
         far = tuple(theme.bg[:3])
         half_w = GROUND_HALF_WIDTH_M
         rl.rl_begin(rl.RL_TRIANGLES)
@@ -4693,7 +4765,7 @@ class ClusterUiRenderer:
             self._triangle_strip_point_cache.popitem(last=False)
         return points, point_count
 
-    def _draw_vehicle(self, vehicle: VehicleBox) -> None:
+    def _draw_vehicle(self, vehicle: VehicleBox, *, surround: bool = False) -> None:
         source_marker = vehicle.source.startswith("modelV2") or vehicle.source in ("radarState", "radarPoint", "cornerRadar")
         k8_ego = vehicle.model_name == "k8" and not vehicle.source and self._k8_vehicle_model is not None
         use_model = (
@@ -4702,15 +4774,15 @@ class ClusterUiRenderer:
             and (not vehicle.source or vehicle.primary or vehicle.cut_in)
         )
         if use_model or self._uses_other_model(vehicle):  # EV6 HUD patch v3: realistic 3D cars
-            self._draw_vehicle_shadow(vehicle)
+            self._draw_vehicle_shadow(vehicle, soft=surround)
             self._draw_vehicle_model(vehicle)
             return
         if vehicle.source and (source_marker or (not vehicle.primary and not vehicle.cut_in)):
-            self._draw_vehicle_marker(vehicle)
+            self._draw_vehicle_marker(vehicle, surround=surround)
             return
-        self._draw_vehicle_box(vehicle)
+        self._draw_vehicle_sedan(vehicle, surround=surround)
 
-    def _draw_vehicle_marker(self, vehicle: VehicleBox) -> None:
+    def _draw_vehicle_marker(self, vehicle: VehicleBox, *, surround: bool = False) -> None:
         alpha = int(80 + 150 * clamp(vehicle.confidence, 0.0, 1.0))
 
         def with_alpha(color: tuple[int, int, int] | tuple[int, int, int, int]) -> tuple[int, int, int, int]:
@@ -4735,7 +4807,7 @@ class ClusterUiRenderer:
             top_highlight=with_alpha(vehicle.top_highlight),
             outline_color=with_alpha(vehicle.outline_color),
         )
-        self._draw_vehicle_box(marker_vehicle)
+        self._draw_vehicle_sedan(marker_vehicle, surround=surround)
 
     def _draw_radar_point(self, point: RadarPointMarker) -> None:
         side_m = max(0.16, point.radius_m * 1.75)
@@ -4857,9 +4929,10 @@ class ClusterUiRenderer:
         self._profile_add_elapsed("draw_scene.radar_labels.layout", layout_ms)
         self._profile_add_elapsed("draw_scene.radar_labels.text", text_ms)
 
-    def _draw_vehicle_shadow(self, vehicle: VehicleBox) -> None:
+    def _draw_vehicle_shadow(self, vehicle: VehicleBox, *, soft: bool = False) -> None:
         half_width = vehicle.width_m * 0.5
         half_length = vehicle.length_m * 0.5
+        alpha = int(18 + 34 * clamp(vehicle.confidence, 0.0, 1.0))
 
         def corner(local_x: float, local_y: float, z: float) -> Vec3:
             return Vec3(
@@ -4867,6 +4940,20 @@ class ClusterUiRenderer:
                 vehicle.center.y + vehicle.right_y * local_x + vehicle.forward_y * local_y,
                 z,
             )
+
+        if soft:
+            rim = tuple(corner(x * half_width * 1.45, y * half_length * 1.18, 0.018)
+                        for x, y in SURROUND_SHADOW_RING)
+            rl.rl_begin(rl.RL_TRIANGLES)
+            for index, point in enumerate(rim):
+                following = rim[(index + 1) % len(rim)]
+                rl.rl_color4ub(0, 0, 0, min(110, alpha * 2))
+                rl.rl_vertex3f(vehicle.center.x, vehicle.center.y, 0.018)
+                rl.rl_color4ub(0, 0, 0, 0)
+                rl.rl_vertex3f(point.x, point.y, point.z)
+                rl.rl_vertex3f(following.x, following.y, following.z)
+            rl.rl_end()
+            return
 
         shadow = (
             corner(-half_width * 1.12, -half_length * 1.08, 0.018),
@@ -4879,7 +4966,7 @@ class ClusterUiRenderer:
             shadow[1],
             shadow[2],
             shadow[3],
-            (0, 0, 0, int(18 + 34 * clamp(vehicle.confidence, 0.0, 1.0))),
+            (0, 0, 0, alpha),
         )
 
     def _draw_vehicle_model(self, vehicle: VehicleBox) -> None:
@@ -5118,11 +5205,7 @@ class ClusterUiRenderer:
             self.height - bottom * sy,
         )
 
-    def _draw_vehicle_box(self, vehicle: VehicleBox) -> None:
-        """다른 차량 박스: 이제 글래스 돔 세단 프리즘으로 그린다."""
-        self._draw_vehicle_sedan(vehicle)
-
-    def _draw_vehicle_sedan(self, vehicle: VehicleBox) -> None:
+    def _draw_vehicle_sedan(self, vehicle: VehicleBox, *, surround: bool = False) -> None:
         """글래스 돔 세단: 직사각형 박스 대신 3박스 세단 프리즘을 그린다.
 
         다른 차량(레이더 트랙)은 이제 AMBER 박스가 아니라 글래스 돔 세단이다.
@@ -5130,13 +5213,13 @@ class ClusterUiRenderer:
         여기는 쿼드/외곽선만 그린다. 선두차 하얀 외곽은 그대로 유지한다.
         """
         quads, edges = glass_dome_sedan_geometry(vehicle)
-        self._draw_vehicle_shadow(vehicle)
+        self._draw_vehicle_shadow(vehicle, soft=surround)
         for p0, p1, p2, p3, color in quads:
             self._draw_quad(p0, p1, p2, p3, color)
         outline = rl_color(vehicle.outline_color)
         for start, end in edges:
             rl.draw_line_3d(vec3(start), vec3(end), outline)
-        if vehicle.primary or vehicle.cut_in:
+        if vehicle.cut_in or (vehicle.primary and not surround):
             half_width = vehicle.width_m * 0.5
             half_length = vehicle.length_m * 0.5
             z0 = 0.035
@@ -5234,6 +5317,9 @@ class ClusterUiRenderer:
                 self._profile_add("hud.premium", profile_stage)
                 self._draw_status_footer(state)
                 return
+            if screen_mode == CLUSTER_SCREEN_MODE_SURROUND:
+                draw_surround_hud(self, state, self._current_theme(), signal_lights)
+                return
             navi_debug_active = state.navi_debug is not None
             navi_live_active = (
                 self._navi_live_panel_visible(state.navi_live)
@@ -5319,7 +5405,7 @@ class ClusterUiRenderer:
             rl.rl_pop_matrix()
             self._profile_add("hud.pop_matrix", profile_stage)
 
-    def _draw_alert_overlay(self, alert: ClusterAlert | None) -> None:
+    def _draw_alert_overlay(self, alert: ClusterAlert | None, *, full_width: bool = False) -> None:
         if alert is None or alert.size <= 0 or not (alert.text1 or alert.text2):
             return
 
@@ -5328,8 +5414,8 @@ class ClusterUiRenderer:
         rl.rl_push_matrix()
         rl.rl_scalef(sx, sy, 1.0)
         try:
-            panel_x = self._driving_panel_offset_design_x()
-            panel_w = CAMERA_BACKGROUND_W
+            panel_x = 0.0 if full_width else self._driving_panel_offset_design_x()
+            panel_w = DESIGN_WIDTH if full_width else CAMERA_BACKGROUND_W
             panel_center_x = panel_x + panel_w * 0.5
 
             if alert.size >= CLUSTER_ALERT_SIZE_FULL:
@@ -5628,7 +5714,7 @@ class ClusterUiRenderer:
     def _effective_screen_mode(self, state: ClusterUiState) -> int:
         requested_screen_mode = getattr(self, "screen_mode", CLUSTER_SCREEN_MODE_DEFAULT)
         if (
-            requested_screen_mode == CLUSTER_SCREEN_MODE_FULLSCREEN_3D
+            requested_screen_mode in (CLUSTER_SCREEN_MODE_FULLSCREEN_3D, CLUSTER_SCREEN_MODE_SURROUND)
             and cluster_camera_view_is_road_camera(getattr(state, "camera_view_mode", 0))
         ):
             requested_screen_mode = CLUSTER_SCREEN_MODE_DEFAULT

@@ -1,0 +1,36 @@
+--- a/KO-외부-HUD-화면-모드(0).md
++++ b/KO-외부-HUD-화면-모드(0).md
+@@ -31,3 +31,15 @@
+ <!-- CARROT:MANUAL:BEGIN ClusterHudScreenMode -->
+ <!-- CARROT:REVIEW reviewed-for="" -->
++<!-- CARROT:SECTION:BEGIN BEHAVIOR -->
++### 동작
++
++3D 뷰에서는 주변 차량과 도로를 전체 폭으로 그리고 속도와 주행 보조 상태를 가장자리에 표시합니다. 로드카메라 뷰는 기본 화면을 사용하고, onroad P/R에서는 주차·후진 화면을 먼저 표시합니다.
++<!-- CARROT:SECTION:END BEHAVIOR -->
++
++<!-- CARROT:SECTION:BEGIN USAGE -->
++### 사용
++
++외부 HUD 화면 모드에서 서라운드를 선택합니다. 외부 HUD 테마의 라이트는 주간, 다크는 야간 화면으로 표시합니다. 자동은 기기 현지 시각 기준 06:00부터 18:00까지 주간 화면을 표시합니다.
++<!-- CARROT:SECTION:END USAGE -->
++
+ <!-- CARROT:MANUAL:END ClusterHudScreenMode -->
+--- a/EN-External-HUD-Screen-Mode(0).md
++++ b/EN-External-HUD-Screen-Mode(0).md
+@@ -31,3 +31,15 @@
+ <!-- CARROT:MANUAL:BEGIN ClusterHudScreenMode -->
+ <!-- CARROT:REVIEW reviewed-for="" -->
++<!-- CARROT:SECTION:BEGIN BEHAVIOR -->
++### Behavior
++
++In 3D views, the road and adjacent vehicles fill the screen, with speed and driving assist status at the edges. Road-camera view uses the default layout. Onroad P/R prioritizes parking and reverse screens.
++<!-- CARROT:SECTION:END BEHAVIOR -->
++
++<!-- CARROT:SECTION:BEGIN USAGE -->
++### Usage
++
++Select Surround in External HUD Screen Mode. Select Light for day or Dark for night in External HUD Theme. Auto uses the day view from 06:00 until 18:00 device local time.
++<!-- CARROT:SECTION:END USAGE -->
++
+ <!-- CARROT:MANUAL:END ClusterHudScreenMode -->
