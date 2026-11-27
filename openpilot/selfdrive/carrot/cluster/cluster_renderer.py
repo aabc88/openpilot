@@ -129,9 +129,8 @@ K8_VEHICLE_MODEL_PATH = K8_ASSET_DIR / "k8_cluster.obj"
 K8_PARK_MODEL_PATH = K8_ASSET_DIR / "k8_park.obj"
 K8_PARK_SURFACE_PATH = K8_ASSET_DIR / "k8_park_surface.jpg"
 K8_PARK_PREVIEW_PATH = K8_ASSET_DIR / "k8_park_preview.png"
-# Bounds of the K8 preview in its 1600 x 900 render target, in texture coordinates.
-# Cropped car bounds from the reverse camera at DESIGN_WIDTH × DESIGN_HEIGHT.
-K8_REVERSE_CAR_RECT = (455.5, 132.5, 428.0, 179.5)
+# Fit the overhead image, including its transparent margin, to the reverse guide.
+K8_REVERSE_CAR_RECT = (436.5, 141.5, 465.8, 183.4)
 OTHER_VEHICLE_MODELS_DIR = CLUSTER_DIR / "assets" / "models" / "others"
 OTHER_VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "generic" / "generic_car_cluster.obj"
 TPMS_CAR_ICON_PATH = CLUSTER_DIR / "assets" / "images" / "tpms_toy_car.png"
